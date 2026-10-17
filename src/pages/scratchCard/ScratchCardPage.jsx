@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search } from 'lucide-react';
+import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { scratchCardService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
 import { useAuth } from '../../context/AuthContext';
@@ -94,7 +94,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [preview, setPreview]   = useState(null);
   const [noteTarget, setNoteTarget] = useState(null);
   const [savingId, setSavingId] = useState(null);
-  const limit = 10;
+  const [limit, setLimit]       = useState(10);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -122,7 +122,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     } finally {
       setLoading(false);
     }
-  }, [search, reference, phone, status, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page]);
+  }, [search, reference, phone, status, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
@@ -220,10 +220,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
 
   const totalCount = meta?.count ?? rows.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
-  // Page numbers in blocks of 10 (1–10, 11–20, ...); Next past the end of a
-  // block moves on to the next block.
-  const firstShown = Math.floor((page - 1) / 10) * 10 + 1;
-  const pageNumbers = Array.from({ length: Math.min(10, totalPages - firstShown + 1) }, (_, i) => firstShown + i);
+  const pageItems = paginationItems(page, totalPages);
   const columns = [
     'SL', 'Reference', 'Date', 'Card Image', 'Full Name', 'Phone', 'Delivered Address', 'Prize', 'Delivery Charge',
     ...(isRepeat ? ['Previous Claims'] : []),
@@ -295,7 +292,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                 <select value={agentFilter} onChange={(e) => { setAgentFilter(e.target.value); setPage(1); }} className={filterClass}>
                   <option value="">All Agents</option>
                   <option value="unassigned">Not Assigned</option>
-                  {agents.map((a) => <option key={a.Id} value={a.Id}>{a.name}</option>)}
+                  {agents.map((a) => <option key={a.Id} value={a.Id}>{a.name}{a.role ? ` (${a.role})` : ''}</option>)}
                 </select>
               </FilterField>
             )}
@@ -315,7 +312,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             <select value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)}
               className="h-8 text-xs border border-gray-300 rounded-md px-2 bg-white focus:outline-none focus:border-indigo-400">
               <option value="">Select Agent</option>
-              {agents.map((a) => <option key={a.Id} value={a.Id}>{a.name}</option>)}
+              {agents.map((a) => <option key={a.Id} value={a.Id}>{a.name}{a.role ? ` (${a.role})` : ''}</option>)}
               <option value="none">— Remove assignment —</option>
             </select>
             <button type="button" onClick={handleAssign} disabled={assigning || !selectedIds.length}
@@ -325,7 +322,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             {agentsError ? (
               <span className="text-[11px] text-red-500">Agent list load হয়নি: {agentsError}</span>
             ) : !agents.length && (
-              <span className="text-[11px] text-gray-400">No active user with the Agent role yet</span>
+              <span className="text-[11px] text-gray-400">No active staff user (non-admin) yet</span>
             )}
             {/* Approved cards go to the courier; from then on the courier sets the status. */}
             <span className="ml-auto text-xs text-gray-600">Courier:</span>
@@ -342,6 +339,11 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             </button>
           </div>
         )}
+
+        <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 text-sm text-gray-500">
+          <PageSizePicker value={limit} onChange={(n) => { setLimit(n); setPage(1); }} />
+          <span>Total <b className="text-gray-800">{totalCount}</b> entries</span>
+        </div>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1000px] text-xs">
@@ -465,23 +467,25 @@ export default function ScratchCardPage({ claimType = 'first' }) {
         </div>
 
         <div className="px-4 py-3 flex flex-col items-center gap-2 border-t border-gray-100">
-          <div className="flex flex-wrap justify-center gap-1">
-            <PagBtn onClick={() => setPage(1)} disabled={page === 1} label="«" />
-            <PagBtn onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} label="‹" />
-            {pageNumbers.map((n) => (
-              <button key={n} type="button" onClick={() => setPage(n)}
-                className={`min-w-7 h-7 px-1.5 rounded text-xs font-semibold flex items-center justify-center transition ${
-                  n === page ? 'bg-indigo-500 text-white' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+          <nav aria-label="Pagination" className="flex flex-wrap items-center justify-center gap-1">
+            <PagBtn onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} label="Previous">
+              <ChevronLeft size={16} /><span className="hidden sm:inline">Previous</span>
+            </PagBtn>
+            {pageItems.map((n) => (
+              <button key={n} type="button" onClick={() => setPage(n)} aria-current={n === page ? 'page' : undefined}
+                className={`min-w-9 h-9 px-2 rounded-md text-sm font-medium flex items-center justify-center transition ${
+                  n === page ? 'bg-indigo-600 text-white shadow-sm' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-100'}`}>
                 {n}
               </button>
             ))}
-            <PagBtn onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} label="›" />
-            <PagBtn onClick={() => setPage(totalPages)} disabled={page >= totalPages} label="»" />
-          </div>
-          <span className="text-xs text-gray-500">
-            {totalCount
-              ? `Showing ${(page - 1) * limit + 1} to ${Math.min(page * limit, totalCount)} of ${totalCount} entries`
-              : 'Total 0 entries'}
+            <PagBtn onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} label="Next">
+              <span className="hidden sm:inline">Next</span><ChevronRight size={16} />
+            </PagBtn>
+          </nav>
+          <span className="text-sm text-gray-500">
+            {totalCount ? (
+              <>Showing <b className="text-gray-800">{(page - 1) * limit + 1}</b>–<b className="text-gray-800">{Math.min(page * limit, totalCount)}</b> of <b className="text-gray-800">{totalCount}</b> entries</>
+            ) : 'No entries'}
           </span>
         </div>
       </div>
@@ -667,11 +671,59 @@ function DateRange({ label, from, to, onFrom, onTo, className }) {
   );
 }
 
-function PagBtn({ onClick, disabled, label }) {
+const PAGE_SIZES = [10, 20, 50, 100, 500, 1000, 2000];
+const MAX_PAGE_SIZE = 5000; // the scratch card API allows up to this many
+
+// Rows per page: preset sizes, or "Custom" for any number up to MAX_PAGE_SIZE.
+function PageSizePicker({ value, onChange }) {
+  const [custom, setCustom] = useState(!PAGE_SIZES.includes(value));
+  const [draft, setDraft] = useState(String(value));
+  const fieldClass = 'h-9 text-sm border border-gray-300 rounded-md px-2 bg-white text-gray-700 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200';
+
+  function applyDraft() {
+    const n = Math.min(Math.max(Math.floor(Number(draft)) || 0, 1), MAX_PAGE_SIZE);
+    if (!Number(draft)) return setDraft(String(value));
+    setDraft(String(n));
+    if (n !== value) onChange(n);
+  }
+
   return (
-    <button onClick={onClick} disabled={disabled}
-      className={`w-7 h-7 rounded border border-gray-300 flex items-center justify-center text-xs transition ${disabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-50'}`}>
-      {label}
+    <label className="flex items-center gap-2">
+      <span>Per page</span>
+      <select value={custom ? 'custom' : value} className={fieldClass}
+        onChange={(e) => {
+          if (e.target.value === 'custom') { setCustom(true); setDraft(String(value)); return; }
+          setCustom(false);
+          onChange(Number(e.target.value));
+        }}>
+        {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+        <option value="custom">Custom</option>
+      </select>
+      {custom && (
+        <input type="number" min={1} max={MAX_PAGE_SIZE} value={draft} autoFocus
+          onChange={(e) => setDraft(e.target.value.replace(/\D/g, ''))}
+          onBlur={applyDraft}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          className={`${fieldClass} w-24`} placeholder={`1–${MAX_PAGE_SIZE}`} />
+      )}
+    </label>
+  );
+}
+
+function PagBtn({ onClick, disabled, label, children }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={label}
+      className={`h-9 px-3 rounded-md border flex items-center gap-1 text-sm font-medium transition ${disabled ? 'border-gray-200 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'}`}>
+      {children}
     </button>
   );
+}
+
+// Up to 10 consecutive page numbers with the current page kept near the
+// middle: page 10 of 13 shows 4–13, page 6 of 30 shows 1–10.
+const VISIBLE_PAGES = 10;
+function paginationItems(page, totalPages) {
+  const count = Math.min(VISIBLE_PAGES, totalPages);
+  const first = Math.max(1, Math.min(page - Math.floor(VISIBLE_PAGES / 2) + 1, totalPages - count + 1));
+  return Array.from({ length: count }, (_, i) => first + i);
 }
