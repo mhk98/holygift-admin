@@ -13,6 +13,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { getLogo, getSiteName } from "../utils/siteBranding";
 import { assetUrl } from "../utils/assetUrl";
+import { getPermissionSet, hasPermission } from "../utils/permissions";
 import {
   connectNotificationSocket,
   disconnectNotificationSocket,
@@ -62,6 +63,7 @@ export default function TopNav({
   onMenuClick,
 }) {
   const { user, logout } = useAuth();
+  const permissionSet = getPermissionSet(user);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -338,26 +340,35 @@ export default function TopNav({
               window.open(SITE_URL, "_blank", "noopener,noreferrer")
             }
           />
-          <NavBtn
-            color="bg-[#111111]"
-            label="Landing Page"
-            onClick={() => onQuickNavigate?.("landing")}
-          />
-          <NavBtn
-            color="bg-[#1F1F1F]"
-            label="Visitors"
-            onClick={() => onQuickNavigate?.("visitors")}
-          />
-          <NavBtn
-            color="bg-[#3F3F3F]"
-            label="POS"
-            onClick={() => onQuickNavigate?.("pos")}
-          />
-          <NavBtn
-            color="bg-[#404040]"
-            label="Expense"
-            onClick={() => onQuickNavigate?.("expense")}
-          />
+          {/* Shortcuts show only when the role can open the page behind them. */}
+          {hasPermission(permissionSet, "landing_page") && (
+            <NavBtn
+              color="bg-[#111111]"
+              label="Landing Page"
+              onClick={() => onQuickNavigate?.("landing")}
+            />
+          )}
+          {hasPermission(permissionSet, "marketing_tools") && (
+            <NavBtn
+              color="bg-[#1F1F1F]"
+              label="Visitors"
+              onClick={() => onQuickNavigate?.("visitors")}
+            />
+          )}
+          {hasPermission(permissionSet, "orders") && (
+            <NavBtn
+              color="bg-[#3F3F3F]"
+              label="POS"
+              onClick={() => onQuickNavigate?.("pos")}
+            />
+          )}
+          {hasPermission(permissionSet, "expense") && (
+            <NavBtn
+              color="bg-[#404040]"
+              label="Expense"
+              onClick={() => onQuickNavigate?.("expense")}
+            />
+          )}
           <NavBtn
             color="bg-[#3F3F3F]"
             label="Full Tutorial"

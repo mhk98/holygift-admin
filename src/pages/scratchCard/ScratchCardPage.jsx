@@ -1,19 +1,69 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import Select from 'react-select';
+import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
 import { scratchCardService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
 import { useAuth } from '../../context/AuthContext';
+import PathaoStickerSheet from './PathaoStickerSheet';
 
 // Statuses set by hand; must match SCRATCH_CARD_STATUSES in the backend. Once a
 // card is sent to Steadfast/Pathao its status is the courier's own.
-const STATUSES = ['Pending', 'Approved', 'Rejected'];
+const STATUSES = ['Pending', 'Approved', 'Rejected', 'Not Responding'];
 
 const STATUS_STYLES = {
   Pending: 'bg-amber-50 text-amber-700 border-amber-200',
   Approved: 'bg-blue-50 text-blue-700 border-blue-200',
   Rejected: 'bg-red-50 text-red-700 border-red-200',
+  'Not Responding': 'bg-gray-100 text-gray-700 border-gray-300',
   Delivered: 'bg-green-50 text-green-700 border-green-200',
 };
+const COURIERS_FOR_FILTER = ['Steadfast', 'Pathao'];
+
+// The prizes on the storefront form; must match PRIZES in the frontend's ScratchCardClient.tsx.
+const PRIZES = ['TV', 'Fridge', 'Rice Cooker', 'Induction Chula', 'Luxury Wall Watch'];
+
+const PRIZE_OPTIONS = PRIZES.map((p) => ({ value: p, label: p }));
+
+// Courier status filter values, matching courierStatusCondition in the backend.
+const COURIER_FILTER_BASE = [
+  {
+    label: 'Courier',
+    options: [
+      { value: 'none', label: 'Not sent to courier' },
+      ...COURIERS_FOR_FILTER.map((c) => ({ value: `courier:${c}`, label: `Sent to ${c}` })),
+    ],
+  },
+  {
+    label: 'Stage',
+    options: [
+      { value: 'stage:in_courier', label: 'In Courier' },
+      { value: 'stage:on_hold', label: 'On Hold' },
+      { value: 'stage:delivered', label: 'Delivered' },
+      { value: 'stage:returned', label: 'Returned' },
+      { value: 'stage:cancelled', label: 'Cancelled' },
+    ],
+  },
+];
+
+// react-select sized to match the other h-9 filter inputs.
+const FILTER_SELECT_STYLES = {
+  control: (base, state) => ({
+    ...base,
+    minHeight: 36,
+    height: 36,
+    fontSize: 12,
+    borderRadius: 6,
+    borderColor: state.isFocused ? '#818cf8' : '#d1d5db',
+    boxShadow: state.isFocused ? '0 0 0 1px #c7d2fe' : 'none',
+    '&:hover': { borderColor: state.isFocused ? '#818cf8' : '#9ca3af' },
+  }),
+  valueContainer: (base) => ({ ...base, padding: '0 8px' }),
+  indicatorsContainer: (base) => ({ ...base, height: 34 }),
+  dropdownIndicator: (base) => ({ ...base, padding: 6 }),
+  clearIndicator: (base) => ({ ...base, padding: 6 }),
+  menu: (base) => ({ ...base, fontSize: 12, zIndex: 30 }),
+};
+
 const COURIER_STATUS_STYLE = 'bg-violet-50 text-violet-700 border-violet-200';
 
 // Filter rows: auto-fit fills the width and wraps on narrow screens.
@@ -70,7 +120,10 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const { user } = useAuth();
   // Admins assign claims to agents; an agent's list only holds their own
   // claims (the backend enforces this).
-  const canAssign = ['superadmin', 'admin'].includes(String(user?.role || '').trim().toLowerCase());
+  const userRole = String(user?.role || '').trim().toLowerCase();
+  const canAssign = ['superadmin', 'admin'].includes(userRole);
+  // Leaders see and work every claim like an admin, but cannot assign or delete.
+  const canViewAll = canAssign || userRole === 'leader';
   const [agents, setAgents]     = useState([]);
   const [agentsError, setAgentsError] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
@@ -78,6 +131,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [assignAgentId, setAssignAgentId] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [courierBusy, setCourierBusy] = useState(false);
+  const [stickerCards, setStickerCards] = useState([]);
   const [rows, setRows]         = useState([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
@@ -85,6 +139,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [reference, setReference] = useState('');
   const [phone, setPhone]       = useState('');
   const [status, setStatus]     = useState('');
+  const [prize, setPrize]       = useState('');
+  const [courierStatus, setCourierStatus] = useState('');
   const [submittedFrom, setSubmittedFrom] = useState('');
   const [submittedTo, setSubmittedTo]     = useState('');
   const [approvedFrom, setApprovedFrom]   = useState('');
@@ -105,6 +161,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
         reference: reference.trim() || undefined,
         phone: phone.trim() || undefined,
         status: status || undefined,
+        prize: prize || undefined,
+        courierStatus: courierStatus || undefined,
         submittedFrom: submittedFrom || undefined,
         submittedTo: submittedTo || undefined,
         approvedFrom: approvedFrom || undefined,
@@ -122,16 +180,16 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     } finally {
       setLoading(false);
     }
-  }, [search, reference, phone, status, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
+  }, [search, reference, phone, status, prize, courierStatus, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   useEffect(() => {
-    if (!canAssign) return;
+    if (!canViewAll) return;
     scratchCardService.getAgents()
       .then((res) => { setAgents(res.data || []); setAgentsError(''); })
       .catch((err) => { setAgents([]); setAgentsError(err.message || 'Agent list load failed'); });
-  }, [canAssign]);
+  }, [canViewAll]);
 
   async function handleAssign() {
     if (!selectedIds.length) return alert('Assign করার জন্য আগে scratch card select করুন');
@@ -185,6 +243,28 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     }
   }
 
+  // Print once the sticker sheet has rendered, and drop it afterwards.
+  useEffect(() => {
+    if (!stickerCards.length) return undefined;
+    const handleAfterPrint = () => setStickerCards([]);
+    window.addEventListener('afterprint', handleAfterPrint);
+    const timer = window.setTimeout(() => window.print(), 100);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, [stickerCards]);
+
+  function handlePrintStickers() {
+    const selected = rows.filter((row) => selectedIds.includes(row.Id));
+    if (!selected.length) return alert('Sticker print করার জন্য আগে scratch card select করুন');
+    const printable = selected.filter((row) => row.courier === 'Pathao' && (row.consignmentId || row.trackingCode));
+    if (!printable.length) return alert('Select করা কোনো card Pathao তে পাঠানো হয়নি। আগে Send to Pathao করুন।');
+    const skipped = selected.length - printable.length;
+    if (skipped && !window.confirm(`${skipped} টি card Pathao তে পাঠানো হয়নি, সেগুলো বাদ যাবে। বাকি ${printable.length} টি sticker print করবেন?`)) return;
+    setStickerCards(printable);
+  }
+
   function toggleSelected(id) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   }
@@ -222,19 +302,35 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const pageItems = paginationItems(page, totalPages);
   const columns = [
-    'SL', 'Reference', 'Date', 'Card Image', 'Full Name', 'Phone', 'Delivered Address', 'Prize', 'Delivery Charge',
+    'SL', 'Reference', 'Consignment ID', 'Date', 'Card Image', 'Full Name', 'Phone', 'Delivered Address', 'Prize', 'Delivery Charge',
     ...(isRepeat ? ['Previous Claims'] : []),
-    ...(canAssign ? ['Assigned To'] : []),
+    ...(canViewAll ? ['Assigned To'] : []),
     'Status', 'Action',
   ];
-  const colCount = columns.length + (canAssign ? 1 : 0);
+  const colCount = columns.length + (canViewAll ? 1 : 0);
   const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(row.Id));
   const filterClass = 'w-full h-9 text-xs border border-gray-300 rounded-md px-2.5 bg-white focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200';
-  const filterValues = [search, reference, phone, status, agentFilter, submittedFrom, submittedTo, approvedFrom, approvedTo];
+  const filterValues = [search, reference, phone, status, prize, courierStatus, agentFilter, submittedFrom, submittedTo, approvedFrom, approvedTo];
   const activeFilterCount = filterValues.filter(Boolean).length;
 
+  const statusOptions = (meta?.statuses?.length ? meta.statuses : STATUSES).map((st) => ({ value: st, label: st }));
+
+  // The exact statuses come from the cards already with a courier.
+  const courierStatusOptions = [
+    ...COURIER_FILTER_BASE,
+    ...(meta?.courierStatuses?.length
+      ? [{ label: 'Exact Status', options: meta.courierStatuses.map((st) => ({ value: `status:${st}`, label: st })) }]
+      : []),
+  ];
+  const selectedCourierStatus = courierStatusOptions.flatMap((g) => g.options).find((o) => o.value === courierStatus) || null;
+
+  const agentOptions = [
+    { value: 'unassigned', label: 'Not Assigned' },
+    ...agents.map((a) => ({ value: String(a.Id), label: `${a.name}${a.role ? ` (${a.role})` : ''}` })),
+  ];
+
   function resetFilters() {
-    [setSearch, setReference, setPhone, setStatus, setAgentFilter,
+    [setSearch, setReference, setPhone, setStatus, setPrize, setCourierStatus, setAgentFilter,
       setSubmittedFrom, setSubmittedTo, setApprovedFrom, setApprovedTo].forEach((set) => set(''));
     setPage(1);
   }
@@ -282,18 +378,45 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                 placeholder="01XXXXXXXXX" inputMode="numeric" className={`${filterClass} font-mono`} />
             </FilterField>
             <FilterField label="Status">
-              <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className={filterClass}>
-                <option value="">All Status</option>
-                {(meta?.statuses?.length ? meta.statuses : STATUSES).map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <Select
+                options={statusOptions}
+                value={status ? { value: status, label: status } : null}
+                onChange={(opt) => { setStatus(opt?.value || ''); setPage(1); }}
+                placeholder="All Status"
+                isClearable
+                styles={FILTER_SELECT_STYLES}
+              />
             </FilterField>
-            {canAssign && (
+            <FilterField label="Courier Status">
+              <Select
+                options={courierStatusOptions}
+                value={selectedCourierStatus}
+                onChange={(opt) => { setCourierStatus(opt?.value || ''); setPage(1); }}
+                placeholder="All"
+                isClearable
+                styles={FILTER_SELECT_STYLES}
+              />
+            </FilterField>
+            <FilterField label="Prize">
+              <Select
+                options={PRIZE_OPTIONS}
+                value={prize ? { value: prize, label: prize } : null}
+                onChange={(opt) => { setPrize(opt?.value || ''); setPage(1); }}
+                placeholder="All Prizes"
+                isClearable
+                styles={FILTER_SELECT_STYLES}
+              />
+            </FilterField>
+            {canViewAll && (
               <FilterField label="Agent">
-                <select value={agentFilter} onChange={(e) => { setAgentFilter(e.target.value); setPage(1); }} className={filterClass}>
-                  <option value="">All Agents</option>
-                  <option value="unassigned">Not Assigned</option>
-                  {agents.map((a) => <option key={a.Id} value={a.Id}>{a.name}{a.role ? ` (${a.role})` : ''}</option>)}
-                </select>
+                <Select
+                  options={agentOptions}
+                  value={agentOptions.find((o) => o.value === agentFilter) || null}
+                  onChange={(opt) => { setAgentFilter(opt?.value || ''); setPage(1); }}
+                  placeholder="All Agents"
+                  isClearable
+                  styles={FILTER_SELECT_STYLES}
+                />
               </FilterField>
             )}
           </div>
@@ -306,9 +429,10 @@ export default function ScratchCardPage({ claimType = 'first' }) {
           </div>
         </div>
 
-        {canAssign && (
+        {canViewAll && (
           <div className="px-4 py-2.5 flex flex-wrap items-center gap-2 border-b border-gray-100 bg-gray-50/60">
-            <span className="text-xs text-gray-600">{selectedIds.length} selected · Assign To:</span>
+            <span className="text-xs text-gray-600">{selectedIds.length} selected{canAssign && ' · Assign To:'}</span>
+            {canAssign && (<>
             <select value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)}
               className="h-8 text-xs border border-gray-300 rounded-md px-2 bg-white focus:outline-none focus:border-indigo-400">
               <option value="">Select Agent</option>
@@ -324,6 +448,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             ) : !agents.length && (
               <span className="text-[11px] text-gray-400">No active staff user (non-admin) yet</span>
             )}
+            </>)}
             {/* Approved cards go to the courier; from then on the courier sets the status. */}
             <span className="ml-auto text-xs text-gray-600">Courier:</span>
             {COURIERS.map((provider) => (
@@ -337,6 +462,10 @@ export default function ScratchCardPage({ claimType = 'first' }) {
               className="rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold px-4 py-1.5 transition">
               {courierBusy ? 'Please wait...' : 'Sync Status'}
             </button>
+            <button type="button" onClick={handlePrintStickers} disabled={!selectedIds.length}
+              className="flex items-center gap-1 rounded-full border border-gray-400 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold px-4 py-1.5 transition">
+              <Printer size={13} /> Print Sticker
+            </button>
           </div>
         )}
 
@@ -349,7 +478,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
           <table className="w-full min-w-[1000px] text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {canAssign && (
+                {canViewAll && (
                   <th className="pl-4 py-3 w-6">
                     <input type="checkbox" checked={allSelected} title="Select all on this page"
                       onChange={() => setSelectedIds(allSelected ? [] : rows.map((row) => row.Id))} />
@@ -368,7 +497,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
               )}
               {!loading && !error && rows.map((row, i) => (
                 <tr key={row.Id} className="border-b border-gray-50 hover:bg-gray-50/60 transition align-top">
-                  {canAssign && (
+                  {canViewAll && (
                     <td className="pl-4 py-3">
                       <input type="checkbox" checked={selectedIds.includes(row.Id)} onChange={() => toggleSelected(row.Id)} />
                     </td>
@@ -379,6 +508,20 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                     {(reference || phone) && (
                       <div className="mt-1 text-[11px] text-gray-500">{row.claimType === 'repeat' ? 'Repeat card' : 'First card'}</div>
                     )}
+                  </td>
+                  {/* Set once the card is sent to Pathao/Steadfast; Steadfast also gives a separate tracking code. */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {row.consignmentId ? (
+                      <>
+                        <div className="font-mono font-semibold text-gray-800">{row.consignmentId}</div>
+                        <div className="mt-1 text-[11px] text-gray-500">
+                          {row.courier}
+                          {row.trackingCode && row.trackingCode !== row.consignmentId && (
+                            <> · Tracking <span className="font-mono">{row.trackingCode}</span></>
+                          )}
+                        </div>
+                      </>
+                    ) : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(row.createdAt)}</td>
                   <td className="px-4 py-3">
@@ -395,7 +538,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   </td>
                   <td className="px-4 py-3 text-gray-600 max-w-[260px] whitespace-pre-line break-words">{row.address}</td>
                   <td className="px-4 py-3">
-                    {canAssign ? (
+                    {canViewAll ? (
                       <PrizeEditor row={row} saving={savingId === row.Id}
                         onSave={(prize) => updateRow(row, { prize })} />
                     ) : (
@@ -404,7 +547,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <DeliveryCharge row={row} charges={meta?.deliveryCharges}
-                      editable={canAssign && !row.courier} saving={savingId === row.Id}
+                      editable={canViewAll && !row.courier} saving={savingId === row.Id}
                       onChange={(deliveryArea) => updateRow(row, { deliveryArea })} />
                   </td>
                   {isRepeat && (
@@ -412,7 +555,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                       <PreviousClaims claims={row.previousClaims} />
                     </td>
                   )}
-                  {canAssign && (
+                  {canViewAll && (
                     <td className="px-4 py-3 whitespace-nowrap">
                       {row.assignedAgentName ? (
                         <>
@@ -429,7 +572,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                           {row.status}
                         </span>
                         <p className="mt-1.5 text-[11px] text-gray-500 whitespace-nowrap">
-                          {row.courier}{row.trackingCode && <> · <span className="font-mono">{row.trackingCode}</span></>}
+                          {row.courier}
                         </p>
                       </>
                     ) : (
@@ -491,6 +634,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
       </div>
 
       {/* Image preview */}
+      {stickerCards.length > 0 && <PathaoStickerSheet cards={stickerCards} />}
+
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}
           onClick={() => setPreview(null)}>
@@ -560,27 +705,32 @@ function PreviousClaims({ claims = [] }) {
   );
 }
 
+// Claims made before the rename still store the old wall watch name.
+const LEGACY_PRIZE_NAMES = { 'Big Size Wall Watch': 'Luxury Wall Watch' };
+
 function PrizeBadge({ prize }) {
   return (
     <span className="inline-block rounded-full bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-1 font-semibold whitespace-nowrap">
-      {prize}
+      {LEGACY_PRIZE_NAMES[prize] || prize}
     </span>
   );
 }
 
-// Inline prize edit: Enter saves, Escape cancels. Max length matches the backend (64).
+// Inline prize edit: the admin picks one of the form's prizes to fix a
+// misspelt or wrong prize. Escape cancels.
 function PrizeEditor({ row, saving, onSave }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(row.prize);
+  const [value, setValue] = useState(null);
 
   function start() {
-    setValue(row.prize);
+    const current = LEGACY_PRIZE_NAMES[row.prize] || row.prize;
+    setValue(PRIZE_OPTIONS.find((o) => o.value === current) || null);
     setEditing(true);
   }
 
   async function save() {
-    const prize = value.trim();
-    if (!prize) return alert('Prize name খালি রাখা যাবে না');
+    const prize = value?.value;
+    if (!prize) return alert('একটি prize নির্বাচন করুন');
     if (prize === row.prize) return setEditing(false);
     if (await onSave(prize)) setEditing(false);
   }
@@ -599,13 +749,20 @@ function PrizeEditor({ row, saving, onSave }) {
 
   return (
     <div className="flex items-center gap-1">
-      <input value={value} autoFocus maxLength={64} disabled={saving}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') save();
-          if (e.key === 'Escape') setEditing(false);
-        }}
-        className="w-36 text-xs border border-purple-300 rounded px-2 py-1 focus:outline-none focus:border-purple-500 disabled:opacity-50" />
+      <div className="w-44">
+        <Select
+          options={PRIZE_OPTIONS}
+          value={value}
+          onChange={setValue}
+          placeholder="Select prize"
+          autoFocus
+          openMenuOnFocus
+          isDisabled={saving}
+          onKeyDown={(e) => { if (e.key === 'Escape') setEditing(false); }}
+          menuPortalTarget={document.body}
+          styles={{ ...FILTER_SELECT_STYLES, menuPortal: (base) => ({ ...base, zIndex: 50 }) }}
+        />
+      </div>
       <button type="button" title="Save" onClick={save} disabled={saving}
         className="w-6 h-6 shrink-0 rounded bg-teal-500 hover:bg-teal-600 disabled:opacity-50 text-white flex items-center justify-center transition">
         <Check size={12} />

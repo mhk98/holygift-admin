@@ -16,6 +16,7 @@ const FALLBACK_PERMISSIONS = [
   'customers',
   'ip_block',
   'scratch_card',
+  'scratch_card_repeat',
   'website_setting',
   'api_integration',
   'marketing_tools',

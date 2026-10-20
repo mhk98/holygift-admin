@@ -555,7 +555,7 @@ export default function Sidebar({ activePage, onNavigate, activeOrderStatus, onO
         {hasPermission(permissionSet, 'scratch_card') && (
           <SidebarItem icon={Gift} label="Scratch Card" active={activePage === 'scratch_card'} onClick={() => onNavigate('scratch_card')} />
         )}
-        {hasPermission(permissionSet, 'scratch_card') && (
+        {hasPermission(permissionSet, 'scratch_card_repeat') && (
           <SidebarItem icon={Repeat} label="Repeat Scratch Card" active={activePage === 'scratch_card_repeat'} onClick={() => onNavigate('scratch_card_repeat')} />
         )}
 
