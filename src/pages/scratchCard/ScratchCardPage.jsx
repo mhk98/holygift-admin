@@ -536,7 +536,12 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   <td className="px-4 py-3 font-mono text-gray-700 whitespace-nowrap">
                     <a href={`tel:${row.phone}`} className="hover:text-blue-600">{row.phone}</a>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[260px] whitespace-pre-line break-words">{row.address}</td>
+                  <td className="px-4 py-3 text-gray-600 max-w-[260px] whitespace-pre-line break-words">
+                    {canViewAll && !row.courier ? (
+                      <AddressEditor row={row} saving={savingId === row.Id}
+                        onSave={(address) => updateRow(row, { address })} />
+                    ) : row.address}
+                  </td>
                   <td className="px-4 py-3">
                     {canViewAll ? (
                       <PrizeEditor row={row} saving={savingId === row.Id}
@@ -548,7 +553,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   <td className="px-4 py-3 whitespace-nowrap">
                     <DeliveryCharge row={row} charges={meta?.deliveryCharges}
                       editable={canViewAll && !row.courier} saving={savingId === row.Id}
-                      onChange={(deliveryArea) => updateRow(row, { deliveryArea })} />
+                      onChange={(deliveryArea) => updateRow(row, { deliveryArea })}
+                      onSaveAmount={(deliveryCharge) => updateRow(row, { deliveryCharge })} />
                   </td>
                   {isRepeat && (
                     <td className="px-4 py-3">
@@ -775,11 +781,70 @@ function PrizeEditor({ row, saving, onSave }) {
   );
 }
 
+// Inline address edit for a card not yet sent to a courier. Escape cancels.
+function AddressEditor({ row, saving, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+
+  function start() {
+    setValue(row.address || '');
+    setEditing(true);
+  }
+
+  async function save() {
+    const address = value.trim();
+    if (!address) return alert('Address লিখুন');
+    if (address === row.address) return setEditing(false);
+    if (await onSave(address)) setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-start gap-1.5">
+        <span>{row.address}</span>
+        <button type="button" title="Edit address" onClick={start}
+          className="w-6 h-6 shrink-0 rounded text-gray-400 hover:text-purple-600 hover:bg-purple-50 flex items-center justify-center transition">
+          <Pencil size={12} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-1">
+      <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={3} autoFocus disabled={saving}
+        onKeyDown={(e) => { if (e.key === 'Escape') setEditing(false); }}
+        className="w-52 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-purple-400 disabled:opacity-50" />
+      <div className="flex flex-col gap-1">
+        <button type="button" title="Save" onClick={save} disabled={saving}
+          className="w-6 h-6 shrink-0 rounded bg-teal-500 hover:bg-teal-600 disabled:opacity-50 text-white flex items-center justify-center transition">
+          <Check size={12} />
+        </button>
+        <button type="button" title="Cancel" onClick={() => setEditing(false)} disabled={saving}
+          className="w-6 h-6 shrink-0 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 flex items-center justify-center transition">
+          <X size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // The customer pays only the delivery charge; the courier collects it as COD.
 // Inside/outside Dhaka is guessed from the address, and an admin can correct it
-// until the card is sent. After that it shows the amount actually sent.
-function DeliveryCharge({ row, charges, editable, saving, onChange }) {
+// or type a custom amount until the card is sent. After that it shows the amount
+// actually sent. Picking an area again drops the custom amount.
+function DeliveryCharge({ row, charges, editable, saving, onChange, onSaveAmount }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
   const amount = <span className="font-semibold text-gray-800">৳{Number(row.deliveryCharge ?? 0)}</span>;
+
+  async function saveAmount() {
+    const next = Number(value);
+    if (value === '' || !Number.isFinite(next) || next < 0) return alert('সঠিক delivery charge লিখুন');
+    if (next === Number(row.deliveryCharge)) return setEditing(false);
+    if (await onSaveAmount(next)) setEditing(false);
+  }
+
   if (!editable) {
     return (
       <>
@@ -792,7 +857,31 @@ function DeliveryCharge({ row, charges, editable, saving, onChange }) {
   }
   return (
     <>
-      {amount}
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <input type="number" min="0" value={value} onChange={(e) => setValue(e.target.value)} autoFocus disabled={saving}
+            onKeyDown={(e) => { if (e.key === 'Enter') saveAmount(); if (e.key === 'Escape') setEditing(false); }}
+            className="w-20 text-xs border border-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-purple-400 disabled:opacity-50" />
+          <button type="button" title="Save" onClick={saveAmount} disabled={saving}
+            className="w-6 h-6 shrink-0 rounded bg-teal-500 hover:bg-teal-600 disabled:opacity-50 text-white flex items-center justify-center transition">
+            <Check size={12} />
+          </button>
+          <button type="button" title="Cancel" onClick={() => setEditing(false)} disabled={saving}
+            className="w-6 h-6 shrink-0 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 flex items-center justify-center transition">
+            <X size={12} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          {amount}
+          {row.codAmount != null && <span className="text-[10px] text-purple-600">custom</span>}
+          <button type="button" title="Edit delivery charge"
+            onClick={() => { setValue(String(Number(row.deliveryCharge ?? 0))); setEditing(true); }}
+            className="w-6 h-6 shrink-0 rounded text-gray-400 hover:text-purple-600 hover:bg-purple-50 flex items-center justify-center transition">
+            <Pencil size={12} />
+          </button>
+        </div>
+      )}
       <select value={row.deliveryArea} disabled={saving} onChange={(e) => onChange(e.target.value)}
         className="mt-1 block text-[11px] border border-gray-300 rounded px-1.5 py-0.5 bg-white focus:outline-none disabled:opacity-50">
         <option value="inside">ঢাকার ভিতরে{charges ? ` (৳${charges.inside})` : ''}</option>
