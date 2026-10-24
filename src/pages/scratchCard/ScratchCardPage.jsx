@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Select from 'react-select';
+import { normalizeCrossProducts } from '../../utils/crossProducts';
 import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
+import { productService } from '../../services/productService';
 import { scratchCardService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
 import { useAuth } from '../../context/AuthContext';
@@ -84,11 +86,20 @@ const COURIERS = [
 ];
 
 // One line per card the courier didn't take, so the admin knows what to fix.
+// Pathao rejects shorter delivery addresses.
+const MIN_PATHAO_ADDRESS_LENGTH = 10;
+const isShortAddress = (address) => String(address || '').trim().length < MIN_PATHAO_ADDRESS_LENGTH;
+
 function courierSummary(title, done, problems) {
   const lines = [`${title}: ${done}`];
   if (problems.length) {
     lines.push('', 'পাঠানো যায়নি:');
-    problems.forEach((p) => lines.push(`• ${p.reference}: ${p.message}`));
+    // Same reason once, with every card it applies to, so other reasons stand out.
+    const byMessage = new Map();
+    problems.forEach((p) => byMessage.set(p.message, [...(byMessage.get(p.message) || []), p.reference]));
+    [...byMessage].sort((a, b) => b[1].length - a[1].length).forEach(([message, refs]) => {
+      lines.push('', `• ${message} (${refs.length} টি):`, refs.join(', '));
+    });
   }
   return lines.join('\n');
 }
@@ -124,6 +135,10 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const canAssign = ['superadmin', 'admin'].includes(userRole);
   // Leaders see and work every claim like an admin, but cannot assign or delete.
   const canViewAll = canAssign || userRole === 'leader';
+  const [productOptions, setProductOptions] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState('');
+  const [productReload, setProductReload] = useState(0);
   const [agents, setAgents]     = useState([]);
   const [agentsError, setAgentsError] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
@@ -139,8 +154,9 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [reference, setReference] = useState('');
   const [phone, setPhone]       = useState('');
   const [status, setStatus]     = useState('');
+  const [crossProductId, setCrossProductId] = useState('');
   const [prize, setPrize]       = useState('');
-  const [courierStatus, setCourierStatus] = useState('');
+  const [courierStatus, setCourierStatus] = useState([]);
   const [submittedFrom, setSubmittedFrom] = useState('');
   const [submittedTo, setSubmittedTo]     = useState('');
   const [approvedFrom, setApprovedFrom]   = useState('');
@@ -162,7 +178,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
         phone: phone.trim() || undefined,
         status: status || undefined,
         prize: prize || undefined,
-        courierStatus: courierStatus || undefined,
+        crossProductId: crossProductId || undefined,
+        courierStatus: courierStatus.length ? JSON.stringify(courierStatus) : undefined,
         submittedFrom: submittedFrom || undefined,
         submittedTo: submittedTo || undefined,
         approvedFrom: approvedFrom || undefined,
@@ -180,7 +197,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     } finally {
       setLoading(false);
     }
-  }, [search, reference, phone, status, prize, courierStatus, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
+  }, [search, reference, phone, status, prize, crossProductId, courierStatus, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
@@ -190,6 +207,19 @@ export default function ScratchCardPage({ claimType = 'first' }) {
       .then((res) => { setAgents(res.data || []); setAgentsError(''); })
       .catch((err) => { setAgents([]); setAgentsError(err.message || 'Agent list load failed'); });
   }, [canViewAll]);
+
+  useEffect(() => {
+    let cancelled = false;
+    productService.getAllList()
+      .then((res) => {
+        if (!cancelled) setProductOptions((res.data || []).map((p) => ({
+          value: Number(p.Id), label: p.sku ? `${p.name} (${p.sku})` : p.name,
+        })));
+      })
+      .catch((err) => { if (!cancelled) setProductsError(err.message || 'Products could not be loaded'); })
+      .finally(() => { if (!cancelled) setProductsLoading(false); });
+    return () => { cancelled = true; };
+  }, [productReload]);
 
   async function handleAssign() {
     if (!selectedIds.length) return alert('Assign করার জন্য আগে scratch card select করুন');
@@ -302,7 +332,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const pageItems = paginationItems(page, totalPages);
   const columns = [
-    'SL', 'Reference', 'Consignment ID', 'Date', 'Card Image', 'Full Name', 'Phone', 'Delivered Address', 'Prize', 'Delivery Charge',
+    'SL', 'Reference', 'Consignment ID', 'Date', 'Card Image', 'Full Name', 'Phone', 'Delivered Address', 'Prize', 'Cross Product', 'Delivery Charge',
     ...(isRepeat ? ['Previous Claims'] : []),
     ...(canViewAll ? ['Assigned To'] : []),
     'Status', 'Action',
@@ -310,8 +340,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const colCount = columns.length + (canViewAll ? 1 : 0);
   const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(row.Id));
   const filterClass = 'w-full h-9 text-xs border border-gray-300 rounded-md px-2.5 bg-white focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200';
-  const filterValues = [search, reference, phone, status, prize, courierStatus, agentFilter, submittedFrom, submittedTo, approvedFrom, approvedTo];
-  const activeFilterCount = filterValues.filter(Boolean).length;
+  const filterValues = [search, reference, phone, status, prize, crossProductId, courierStatus, agentFilter, submittedFrom, submittedTo, approvedFrom, approvedTo];
+  const activeFilterCount = filterValues.filter((value) => Array.isArray(value) ? value.length > 0 : Boolean(value)).length;
 
   const statusOptions = (meta?.statuses?.length ? meta.statuses : STATUSES).map((st) => ({ value: st, label: st }));
 
@@ -322,15 +352,20 @@ export default function ScratchCardPage({ claimType = 'first' }) {
       ? [{ label: 'Exact Status', options: meta.courierStatuses.map((st) => ({ value: `status:${st}`, label: st })) }]
       : []),
   ];
-  const selectedCourierStatus = courierStatusOptions.flatMap((g) => g.options).find((o) => o.value === courierStatus) || null;
+  const selectedCourierStatus = courierStatus.map((value) => courierStatusOptions.flatMap((g) => g.options).find((option) => option.value === value) || { value, label: value.replace(/^status:/, '') });
 
   const agentOptions = [
     { value: 'unassigned', label: 'Not Assigned' },
     ...agents.map((a) => ({ value: String(a.Id), label: `${a.name}${a.role ? ` (${a.role})` : ''}` })),
   ];
+  const assignAgentOptions = [
+    ...agentOptions.slice(1),
+    { value: 'none', label: '— Remove assignment —' },
+  ];
 
   function resetFilters() {
-    [setSearch, setReference, setPhone, setStatus, setPrize, setCourierStatus, setAgentFilter,
+    setCourierStatus([]);
+    [setSearch, setReference, setPhone, setStatus, setPrize, setCrossProductId, setAgentFilter,
       setSubmittedFrom, setSubmittedTo, setApprovedFrom, setApprovedTo].forEach((set) => set(''));
     setPage(1);
   }
@@ -391,10 +426,15 @@ export default function ScratchCardPage({ claimType = 'first' }) {
               <Select
                 options={courierStatusOptions}
                 value={selectedCourierStatus}
-                onChange={(opt) => { setCourierStatus(opt?.value || ''); setPage(1); }}
-                placeholder="All"
+                onChange={(options) => { setCourierStatus((options || []).map((option) => option.value)); setPage(1); }}
+                isMulti
+                closeMenuOnSelect={false}
+                aria-label="Courier Status filter"
+                placeholder="All Courier Statuses"
                 isClearable
-                styles={FILTER_SELECT_STYLES}
+                styles={{ ...FILTER_SELECT_STYLES,
+                  control: (base, state) => ({ ...FILTER_SELECT_STYLES.control(base, state), height: 'auto' }),
+                }}
               />
             </FilterField>
             <FilterField label="Prize">
@@ -404,6 +444,19 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                 onChange={(opt) => { setPrize(opt?.value || ''); setPage(1); }}
                 placeholder="All Prizes"
                 isClearable
+                styles={FILTER_SELECT_STYLES}
+              />
+            </FilterField>
+            <FilterField label="Cross Product">
+              <Select
+                options={productOptions}
+                value={productOptions.find((option) => String(option.value) === crossProductId) || null}
+                onChange={(option) => { setCrossProductId(option ? String(option.value) : ''); setPage(1); }}
+                placeholder="All Cross Products"
+                aria-label="Filter by Cross Product"
+                isClearable
+                isLoading={productsLoading}
+                isDisabled={productsLoading || Boolean(productsError)}
                 styles={FILTER_SELECT_STYLES}
               />
             </FilterField>
@@ -433,12 +486,16 @@ export default function ScratchCardPage({ claimType = 'first' }) {
           <div className="px-4 py-2.5 flex flex-wrap items-center gap-2 border-b border-gray-100 bg-gray-50/60">
             <span className="text-xs text-gray-600">{selectedIds.length} selected{canAssign && ' · Assign To:'}</span>
             {canAssign && (<>
-            <select value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)}
-              className="h-8 text-xs border border-gray-300 rounded-md px-2 bg-white focus:outline-none focus:border-indigo-400">
-              <option value="">Select Agent</option>
-              {agents.map((a) => <option key={a.Id} value={a.Id}>{a.name}{a.role ? ` (${a.role})` : ''}</option>)}
-              <option value="none">— Remove assignment —</option>
-            </select>
+            <div className="w-56">
+              <Select
+                options={assignAgentOptions}
+                value={assignAgentOptions.find((o) => o.value === assignAgentId) || null}
+                onChange={(opt) => setAssignAgentId(opt?.value || '')}
+                placeholder="Select Agent"
+                isClearable
+                styles={FILTER_SELECT_STYLES}
+              />
+            </div>
             <button type="button" onClick={handleAssign} disabled={assigning || !selectedIds.length}
               className="rounded-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-1.5 transition">
               {assigning ? 'Assigning...' : 'Assign Selected'}
@@ -537,22 +594,24 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                     <a href={`tel:${row.phone}`} className="hover:text-blue-600">{row.phone}</a>
                   </td>
                   <td className="px-4 py-3 text-gray-600 max-w-[260px] whitespace-pre-line break-words">
-                    {canViewAll && !row.courier ? (
+                    {!row.courier ? (
                       <AddressEditor row={row} saving={savingId === row.Id}
                         onSave={(address) => updateRow(row, { address })} />
                     ) : row.address}
                   </td>
                   <td className="px-4 py-3">
-                    {canViewAll ? (
-                      <PrizeEditor row={row} saving={savingId === row.Id}
-                        onSave={(prize) => updateRow(row, { prize })} />
-                    ) : (
-                      <PrizeBadge prize={row.prize} />
-                    )}
+                    <PrizeEditor row={row} saving={savingId === row.Id}
+                      onSave={(prize) => updateRow(row, { prize })} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <CrossProductEditor row={row} options={productOptions}
+                      loading={productsLoading} error={productsError}
+                      onRetry={() => { setProductsLoading(true); setProductsError(''); setProductReload((value) => value + 1); }}
+                      onSave={(crossProductIds) => updateRow(row, { crossProductIds })} />
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <DeliveryCharge row={row} charges={meta?.deliveryCharges}
-                      editable={canViewAll && !row.courier} saving={savingId === row.Id}
+                      editable={!row.courier} saving={savingId === row.Id}
                       onChange={(deliveryArea) => updateRow(row, { deliveryArea })}
                       onSaveAmount={(deliveryCharge) => updateRow(row, { deliveryCharge })} />
                   </td>
@@ -694,6 +753,43 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   );
 }
 
+function CrossProductEditor({ row, options, loading, error, onRetry, onSave }) {
+  const [saving, setSaving] = useState(false);
+  const value = normalizeCrossProducts(row.crossProducts).map((product) =>
+    options.find((option) => option.value === product.Id) || { value: product.Id, label: product.name });
+
+  async function save(selected) {
+    setSaving(true);
+    try {
+      await onSave((selected || []).map((option) => option.value));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="min-w-[240px] max-w-[320px]">
+      <Select
+        isMulti isClearable closeMenuOnSelect={false}
+        options={options} value={value} onChange={save}
+        isLoading={loading || saving} isDisabled={loading || saving || Boolean(error)}
+        placeholder="Select products"
+        aria-label={`Cross Product for ${row.fullName} (${row.referenceCode || row.Id})`}
+        menuPortalTarget={document.body} menuPosition="fixed"
+        styles={{
+          ...FILTER_SELECT_STYLES,
+          control: (base, state) => ({ ...FILTER_SELECT_STYLES.control(base, state), height: 'auto' }),
+          menuPortal: (base) => ({ ...base, zIndex: 50 }),
+        }}
+      />
+      {saving && <p className="mt-1 text-[11px] text-gray-500" role="status">Saving...</p>}
+      {error && <p className="mt-1 text-[11px] text-red-600" role="alert">
+        {error} <button type="button" className="underline" onClick={onRetry}>Retry</button>
+      </p>}
+    </div>
+  );
+}
+
 function PreviousClaims({ claims = [] }) {
   if (!claims.length) return <span className="text-gray-400">—</span>;
   return (
@@ -794,6 +890,7 @@ function AddressEditor({ row, saving, onSave }) {
   async function save() {
     const address = value.trim();
     if (!address) return alert('Address লিখুন');
+    if (isShortAddress(address)) return alert('পুরো ঠিকানা লিখুন (গ্রাম/এলাকা, থানা, জেলা) — কমপক্ষে ১০ অক্ষর');
     if (address === row.address) return setEditing(false);
     if (await onSave(address)) setEditing(false);
   }
@@ -801,7 +898,12 @@ function AddressEditor({ row, saving, onSave }) {
   if (!editing) {
     return (
       <div className="flex items-start gap-1.5">
-        <span>{row.address}</span>
+        <div>
+          <span className={isShortAddress(row.address) ? 'text-red-600 font-medium' : undefined}>{row.address}</span>
+          {isShortAddress(row.address) && (
+            <p className="text-[11px] text-red-500">ঠিকানা ছোট — Pathao নেবে না</p>
+          )}
+        </div>
         <button type="button" title="Edit address" onClick={start}
           className="w-6 h-6 shrink-0 rounded text-gray-400 hover:text-purple-600 hover:bg-purple-50 flex items-center justify-center transition">
           <Pencil size={12} />

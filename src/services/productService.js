@@ -1,6 +1,7 @@
 import { apiRequest, buildQuery } from "../utils/apiClient";
 
 export const productService = {
+  getAllList: () => apiRequest("/product/all"),
   getAll: (params) => apiRequest(`/product${buildQuery(params)}`),
   getById: (id) => apiRequest(`/product/${id}`),
   create: (data) => apiRequest("/product/create", { method: "POST", body: JSON.stringify(data) }),
