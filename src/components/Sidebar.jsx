@@ -10,7 +10,7 @@ import {
   Ban, SlidersHorizontal, Share2, Phone, Truck as TruckIcon, CircleDot, FilePlus,
   Bike, Banknote, MessageSquare, ShieldAlert,
   Cpu, Ticket, LayoutGrid, Activity, FileText, Folder, TrendingUp,
-  PanelBottom, PanelTop, Gift, Repeat,
+  PanelBottom, PanelTop, Gift, Repeat, Award,
   X,
 } from 'lucide-react';
 import { orderStatusService, siteSettingService } from '../services/websiteService';
@@ -154,6 +154,13 @@ const purchaseSubMenuItems = [
   { key: 'purchase_add',  label: 'Add Purchase',  icon: ShoppingBag, color: 'text-green-400' },
 ];
 
+// ── Scratch Card submenu ─────────────────────────────────────
+const scratchCardSubMenuItems = [
+  { key: 'scratch_card',        label: 'Scratch Card',        icon: Gift,   color: 'text-pink-400'  },
+  { key: 'scratch_card_repeat', label: 'Repeat Scratch Card', icon: Repeat, color: 'text-amber-400' },
+  { key: 'scratch_card_prize',  label: 'Prizes',              icon: Award,  color: 'text-yellow-400' },
+];
+
 // ── Products submenu ─────────────────────────────────────────
 const productSubMenuItems = [
   { key: 'product_manage', label: 'Product Manage', icon: Grid, color: 'text-blue-400' },
@@ -178,6 +185,7 @@ export default function Sidebar({ activePage, onNavigate, activeOrderStatus, onO
   const [landingOpen, setLandingOpen] = useState(activePage === 'landing');
   const [adminOpen, setAdminOpen] = useState(activePage === 'admin');
   const [customersOpen, setCustomersOpen] = useState(activePage === 'customers');
+  const [scratchCardOpen, setScratchCardOpen] = useState(String(activePage || '').startsWith('scratch_card'));
   const [websiteOpen, setWebsiteOpen] = useState(activePage === 'website');
   const [apiOpen, setApiOpen] = useState(activePage === 'api');
   const [marketingOpen, setMarketingOpen] = useState(activePage === 'marketing');
@@ -201,6 +209,7 @@ export default function Sidebar({ activePage, onNavigate, activeOrderStatus, onO
     if (item.key === 'ip_block') return can('ip_block');
     return can('customers');
   });
+  const filteredScratchCardSubMenuItems = scratchCardSubMenuItems.filter((item) => can(item.key));
   const dynamicOrderSubMenuItems = [
     orderSubMenuItems[0],
     ...dynamicOrderStatuses.map((status, index) => ({
@@ -313,6 +322,12 @@ export default function Sidebar({ activePage, onNavigate, activeOrderStatus, onO
     if (next) { onNavigate('customers'); onCustomersPageChange(filteredCustomersSubMenuItems[0]?.key || 'customer_list'); }
   }
   function handleCustomersSub(key) { onNavigate('customers'); onCustomersPageChange(key); }
+
+  function handleScratchCardClick() {
+    const next = !scratchCardOpen;
+    setScratchCardOpen(next);
+    if (next && filteredScratchCardSubMenuItems[0]) onNavigate(filteredScratchCardSubMenuItems[0].key);
+  }
 
   function handleWebsiteClick() {
     const next = !websiteOpen;
@@ -552,11 +567,25 @@ export default function Sidebar({ activePage, onNavigate, activeOrderStatus, onO
         )}
 
         {/* ── Scratch Card ── */}
-        {hasPermission(permissionSet, 'scratch_card') && (
-          <SidebarItem icon={Gift} label="Scratch Card" active={activePage === 'scratch_card'} onClick={() => onNavigate('scratch_card')} />
-        )}
-        {hasPermission(permissionSet, 'scratch_card_repeat') && (
-          <SidebarItem icon={Repeat} label="Repeat Scratch Card" active={activePage === 'scratch_card_repeat'} onClick={() => onNavigate('scratch_card_repeat')} />
+        {filteredScratchCardSubMenuItems.length > 0 && (
+        <ExpandableItem
+          icon={Gift}
+          label="Scratch Card"
+          isOpen={scratchCardOpen}
+          isActive={String(activePage || '').startsWith('scratch_card')}
+          onClick={handleScratchCardClick}
+        >
+          {filteredScratchCardSubMenuItems.map((item) => (
+            <SubItem
+              key={item.key}
+              icon={item.icon}
+              label={item.label}
+              color={item.color}
+              isActive={activePage === item.key}
+              onClick={() => onNavigate(item.key)}
+            />
+          ))}
+        </ExpandableItem>
         )}
 
         {/* ── Website Setting ── */}

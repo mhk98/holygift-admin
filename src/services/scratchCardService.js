@@ -12,3 +12,12 @@ export const scratchCardService = {
     apiRequest("/scratch-cards/courier/sync", { method: "POST", body: JSON.stringify({ ids }) }),
   delete: (id) => apiRequest(`/scratch-cards/${id}`, { method: "DELETE" }),
 };
+
+// Prizes offered on the storefront form; create/update take FormData (optional "image").
+export const scratchCardPrizeService = {
+  getAll: () => apiRequest("/scratch-card-prizes"),
+  getPublic: () => apiRequest("/scratch-card-prizes/public"),
+  create: (formData) => apiRequest("/scratch-card-prizes/create", { method: "POST", body: formData }),
+  update: (id, formData) => apiRequest(`/scratch-card-prizes/${id}`, { method: "PUT", body: formData }),
+  delete: (id) => apiRequest(`/scratch-card-prizes/${id}`, { method: "DELETE" }),
+};

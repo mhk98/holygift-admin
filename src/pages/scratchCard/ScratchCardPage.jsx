@@ -3,7 +3,7 @@ import Select from 'react-select';
 import { normalizeCrossProducts } from '../../utils/crossProducts';
 import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
 import { productService } from '../../services/productService';
-import { scratchCardService } from '../../services/scratchCardService';
+import { scratchCardService, scratchCardPrizeService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
 import { useAuth } from '../../context/AuthContext';
 import PathaoStickerSheet from './PathaoStickerSheet';
@@ -21,10 +21,21 @@ const STATUS_STYLES = {
 };
 const COURIERS_FOR_FILTER = ['Steadfast', 'Pathao'];
 
-// The prizes on the storefront form; must match PRIZES in the frontend's ScratchCardClient.tsx.
-const PRIZES = ['TV', 'Fridge', 'Rice Cooker', 'Induction Chula', 'Luxury Wall Watch'];
-
-const PRIZE_OPTIONS = PRIZES.map((p) => ({ value: p, label: p }));
+// The prizes on the storefront form, managed under Scratch Card > Prizes.
+// Loaded once per session; the filter and prize editor share the request.
+let prizeOptionsRequest = null;
+function usePrizeOptions() {
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    prizeOptionsRequest ||= scratchCardPrizeService.getPublic()
+      .then((res) => (res.data || []).map((p) => ({ value: p.name, label: p.nameBn ? `${p.name} (${p.nameBn})` : p.name })))
+      .catch(() => { prizeOptionsRequest = null; return []; });
+    let alive = true;
+    prizeOptionsRequest.then((opts) => { if (alive) setOptions(opts); });
+    return () => { alive = false; };
+  }, []);
+  return options;
+}
 
 // Courier status filter values, matching courierStatusCondition in the backend.
 const COURIER_FILTER_BASE = [
@@ -126,6 +137,7 @@ const PAGE_COPY = {
 };
 
 export default function ScratchCardPage({ claimType = 'first' }) {
+  const prizeOptions = usePrizeOptions();
   const isRepeat = claimType === 'repeat';
   const copy = PAGE_COPY[claimType] || PAGE_COPY.first;
   const { user } = useAuth();
@@ -439,7 +451,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             </FilterField>
             <FilterField label="Prize">
               <Select
-                options={PRIZE_OPTIONS}
+                options={prizeOptions}
                 value={prize ? { value: prize, label: prize } : null}
                 onChange={(opt) => { setPrize(opt?.value || ''); setPage(1); }}
                 placeholder="All Prizes"
@@ -821,12 +833,13 @@ function PrizeBadge({ prize }) {
 // Inline prize edit: the admin picks one of the form's prizes to fix a
 // misspelt or wrong prize. Escape cancels.
 function PrizeEditor({ row, saving, onSave }) {
+  const prizeOptions = usePrizeOptions();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(null);
 
   function start() {
     const current = LEGACY_PRIZE_NAMES[row.prize] || row.prize;
-    setValue(PRIZE_OPTIONS.find((o) => o.value === current) || null);
+    setValue(prizeOptions.find((o) => o.value === current) || null);
     setEditing(true);
   }
 
@@ -853,7 +866,7 @@ function PrizeEditor({ row, saving, onSave }) {
     <div className="flex items-center gap-1">
       <div className="w-44">
         <Select
-          options={PRIZE_OPTIONS}
+          options={prizeOptions}
           value={value}
           onChange={setValue}
           placeholder="Select prize"
