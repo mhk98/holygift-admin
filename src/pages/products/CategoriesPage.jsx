@@ -75,6 +75,8 @@ export default function CategoriesPage({ onNavigate, onEditCategory }) {
                 <th className="px-4 py-3 text-left text-gray-500 font-semibold">#</th>
                 <th className="px-4 py-3 text-left text-gray-500 font-semibold">Image</th>
                 <th className="px-4 py-3 text-left text-gray-500 font-semibold">Name</th>
+                <th className="px-4 py-3 text-left text-gray-500 font-semibold">Banner Image</th>
+                <th className="px-4 py-3 text-left text-gray-500 font-semibold">Banner Title</th>
                 <th className="px-4 py-3 text-center text-gray-500 font-semibold">Front View</th>
                 <th className="px-4 py-3 text-center text-gray-500 font-semibold">Status</th>
                 <th className="px-4 py-3 text-center text-gray-500 font-semibold">Action</th>
@@ -82,7 +84,7 @@ export default function CategoriesPage({ onNavigate, onEditCategory }) {
             </thead>
             <tbody>
               {categories.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-10 text-gray-400">কোনো ক্যাটাগরি পাওয়া যায়নি</td></tr>
+                <tr><td colSpan={8} className="text-center py-10 text-gray-400">কোনো ক্যাটাগরি পাওয়া যায়নি</td></tr>
               )}
               {categories.map((cat, i) => (
                 <tr key={cat.Id} className="border-b border-gray-50 hover:bg-gray-50/60">
@@ -95,6 +97,14 @@ export default function CategoriesPage({ onNavigate, onEditCategory }) {
                     )}
                   </td>
                   <td className="px-4 py-3 font-semibold text-gray-800">{cat.name}</td>
+                  <td className="px-4 py-3">
+                    {cat.bannerImage ? (
+                      <img src={imageUrl(cat.bannerImage)} alt={cat.bannerTitle || cat.name} className="h-10 w-24 rounded border border-gray-200 object-cover" />
+                    ) : (
+                      <span className="text-[10px] font-semibold text-gray-300">No banner</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">{cat.bannerTitle || '—'}</td>
                   <td className="px-4 py-3 text-center">
                     <StatusBadge status={cat.isActive ?? cat.frontView ? 'Active' : 'Inactive'} />
                   </td>

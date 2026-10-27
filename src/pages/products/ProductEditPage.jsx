@@ -12,9 +12,24 @@ import {
 import { supplierService } from "../../services/supplierService";
 import RichEditor from "../../components/RichEditor";
 import VariantBuilder from "../../components/VariantBuilder";
+import PrizeSelect from "../../components/PrizeSelect";
 import { variantsFromProduct, serializeVariants, clearImageRef, shiftNewImageRefs } from "../../utils/variants";
 import { apiRequest } from "../../utils/apiClient";
 import { imageUrl } from "../../utils/assetUrl";
+
+// MySQL JSON columns can come back as a string.
+function parsePrizeIds(value) {
+  let list = value;
+  if (typeof list === "string") {
+    try { list = JSON.parse(list); } catch { list = []; }
+  }
+  return Array.isArray(list) ? list.map(Number).filter(Boolean) : [];
+}
+
+// Mirrors the backend slugify so the admin sees the real product URL.
+function slugPreview(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
 
 function Toggle({ checked, onChange }) {
   return (
@@ -64,9 +79,6 @@ export default function ProductEditPage({ product, onNavigate }) {
   const [slug, setSlug] = useState(product?.slug || "");
   const [sku, setSku] = useState(product?.sku || "");
   const [productVideo, setProductVideo] = useState(product?.productVideo || "");
-  const [advanceAmount, setAdvanceAmount] = useState(
-    product?.advanceAmount || "",
-  );
   const [stockAlert, setStockAlert] = useState(product?.stockAlert || "");
 
   // ----- descriptions -----
@@ -83,12 +95,10 @@ export default function ProductEditPage({ product, onNavigate }) {
   );
 
   // ----- gift -----
-  const [giftTitle, setGiftTitle] = useState(product?.giftTitle || "");
-  const [giftPrice, setGiftPrice] = useState(product?.giftPrice || "");
+  const [prizeIds, setPrizeIds] = useState(() => parsePrizeIds(product?.prizeIds));
 
   // ----- toggles -----
   const [status, setStatus] = useState(product?.status !== "Inactive");
-  const [bestDeals, setBestDeals] = useState(!!product?.bestDeals);
   const [freeShipping, setFreeShipping] = useState(!!product?.freeShipping);
   const [purchaseEnabled, setPurchaseEnabled] = useState(true);
 
@@ -255,17 +265,14 @@ export default function ProductEditPage({ product, onNavigate }) {
       if (selectedChild) fd.append("childcategoryId", selectedChild);
       if (selectedBrand) fd.append("brandId", selectedBrand);
       if (productVideo) fd.append("productVideo", productVideo);
-      if (advanceAmount) fd.append("advanceAmount", advanceAmount);
       if (stockAlert) fd.append("stockAlert", stockAlert);
       if (description) fd.append("description", description);
       if (shortDescription) fd.append("shortDescription", shortDescription);
       if (metaTitle) fd.append("metaTitle", metaTitle);
       if (metaKeyword) fd.append("metaKeyword", metaKeyword);
       if (metaDescription) fd.append("metaDescription", metaDescription);
-      if (giftTitle) fd.append("giftTitle", giftTitle);
-      if (giftPrice) fd.append("giftPrice", giftPrice);
+      fd.append("prizeIds", JSON.stringify(prizeIds));
       fd.append("status", status ? "Active" : "Inactive");
-      fd.append("bestDeals", bestDeals ? "true" : "false");
       fd.append("freeShipping", freeShipping ? "true" : "false");
       fd.append("purchaseEnabled", purchaseEnabled ? "true" : "false");
       if (purchaseEnabled && selectedSupplier) fd.append("supplierId", selectedSupplier);
@@ -333,6 +340,11 @@ export default function ProductEditPage({ product, onNavigate }) {
                 onChange={(e) => setSlug(e.target.value)}
                 className={inputCls}
               />
+              <p className="mt-1 text-[11px] text-gray-400">
+                {/^[a-z0-9-]*[a-z0-9][a-z0-9-]*$/.test(slugPreview(slug))
+                  ? <>URL: holygift.xyz/product/<span className="font-semibold text-gray-600">{slugPreview(slug)}</span></>
+                  : 'ইংরেজি অক্ষরে লিখুন (যেমন kashmiri-shawl), না হলে product Id দিয়ে URL হবে'}
+              </p>
             </FormField>
           </div>
 
@@ -453,14 +465,6 @@ export default function ProductEditPage({ product, onNavigate }) {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <FormField label="Advance Payment Amount">
-              <input
-                type="number"
-                value={advanceAmount}
-                onChange={(e) => setAdvanceAmount(e.target.value)}
-                className={inputCls}
-              />
-            </FormField>
             <FormField label="Stock Alert">
               <input
                 type="number"
@@ -659,26 +663,11 @@ export default function ProductEditPage({ product, onNavigate }) {
         </div>
       </SectionCard>
 
-      {/* Gift Wrapping */}
-      <SectionCard title="For Gift Wrapping">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <FormField label="Title">
-            <input
-              type="text"
-              value={giftTitle}
-              onChange={(e) => setGiftTitle(e.target.value)}
-              className={inputCls}
-            />
-          </FormField>
-          <FormField label="Price">
-            <input
-              type="number"
-              value={giftPrice}
-              onChange={(e) => setGiftPrice(e.target.value)}
-              className={inputCls}
-            />
-          </FormField>
-        </div>
+      {/* Scratch Card Prize */}
+      <SectionCard title="Scratch Card Prize">
+        <FormField label="এই product এর সাথে যে prize দেওয়া হবে">
+          <PrizeSelect value={prizeIds} onChange={setPrizeIds} />
+        </FormField>
       </SectionCard>
 
       {/* Toggles + Submit */}
@@ -687,12 +676,6 @@ export default function ProductEditPage({ product, onNavigate }) {
           <div className="flex flex-col items-center gap-2">
             <span className="text-xs font-semibold text-gray-600">Status</span>
             <Toggle checked={status} onChange={setStatus} />
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-xs font-semibold text-gray-600">
-              Best Deals
-            </span>
-            <Toggle checked={bestDeals} onChange={setBestDeals} />
           </div>
           <div className="flex flex-col items-center gap-2">
             <span className="text-xs font-semibold text-gray-600">

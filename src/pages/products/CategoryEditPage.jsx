@@ -14,6 +14,22 @@ function Toggle({ checked, onChange }) {
   );
 }
 
+function ImagePreview({ src, alt, className, onRemove }) {
+  return (
+    <div className="relative inline-block mt-2">
+      <img src={src} alt={alt} className={`${className} rounded-lg border border-gray-200 object-cover`} />
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove image"
+        className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center rounded-full bg-red-500 hover:bg-red-600 text-white text-xs leading-none shadow"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 const inputCls = 'w-full border border-gray-300 rounded px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-300 focus:border-blue-400 bg-white';
 
 export default function CategoryEditPage({ category, onNavigate }) {
@@ -22,6 +38,7 @@ export default function CategoryEditPage({ category, onNavigate }) {
   const [frontView, setFrontView] = useState(Boolean(category?.isActive ?? category?.frontView));
   const [imageFile, setImageFile] = useState(category?.imageFile || category?.image || '');
   const [bannerFile, setBannerFile] = useState(category?.bannerImage || '');
+  const [bannerTitle, setBannerTitle] = useState(category?.bannerTitle || '');
   const [imageName, setImageName] = useState('No file chosen');
   const [bannerName, setBannerName] = useState('No file chosen');
   const [sortOrder, setSortOrder] = useState(category?.sortOrder ?? '');
@@ -55,6 +72,7 @@ export default function CategoryEditPage({ category, onNavigate }) {
         imageFile: imageFile || null,
         image: imageFile || null,
         bannerImage: bannerFile || null,
+        bannerTitle: bannerTitle.trim() || null,
         sortOrder: sortOrder === '' ? null : Number(sortOrder),
         metaTitle,
         metaDescription,
@@ -101,21 +119,21 @@ export default function CategoryEditPage({ category, onNavigate }) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Image</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Image <span className="text-xs font-normal text-gray-400">(Recommended: 600 × 330 px)</span></label>
           <label className="flex items-center border border-gray-300 rounded overflow-hidden cursor-pointer w-full">
             <span className="bg-white border-r border-gray-300 px-3 py-2 text-xs text-gray-600 whitespace-nowrap hover:bg-gray-50 transition">
               Choose file
             </span>
             <span className="px-3 text-xs text-gray-400 flex-1">{imageName}</span>
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => readFile(e.target.files[0], setImageFile, setImageName)} />
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => { readFile(e.target.files[0], setImageFile, setImageName); e.target.value = ''; }} />
           </label>
           {imageFile && (
-            <img src={imageUrl(imageFile)} alt={category.name} className="w-16 h-16 rounded-lg object-cover mt-2 border border-gray-200" />
+            <ImagePreview src={imageUrl(imageFile)} alt={category.name} className="w-16 h-16" onRemove={() => { setImageFile(''); setImageName('No file chosen'); }} />
           )}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Banner Image</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Banner Image <span className="text-xs font-normal text-gray-400">(Recommended: 1920 × 480 px)</span></label>
           <label className="flex items-center border border-gray-300 rounded overflow-hidden cursor-pointer w-full">
             <span className="bg-white border-r border-gray-300 px-3 py-2 text-xs text-gray-600 whitespace-nowrap hover:bg-gray-50 transition">
               Choose file
@@ -125,10 +143,15 @@ export default function CategoryEditPage({ category, onNavigate }) {
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => readFile(e.target.files[0], setBannerFile, setBannerName)}
+              onChange={(e) => { readFile(e.target.files[0], setBannerFile, setBannerName); e.target.value = ''; }}
             />
           </label>
-          {bannerFile && <img src={imageUrl(bannerFile)} alt="category banner" className="mt-2 h-20 w-40 rounded-lg border border-gray-200 object-cover" />}
+          {bannerFile && <ImagePreview src={imageUrl(bannerFile)} alt="category banner" className="h-20 w-40" onRemove={() => { setBannerFile(''); setBannerName('No file chosen'); }} />}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Banner Title</label>
+          <input type="text" value={bannerTitle} onChange={(e) => setBannerTitle(e.target.value)} className={inputCls} />
         </div>
 
         <div>

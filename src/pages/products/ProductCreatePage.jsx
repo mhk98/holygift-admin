@@ -6,7 +6,13 @@ import {
 import { supplierService } from '../../services/supplierService';
 import RichEditor from '../../components/RichEditor';
 import VariantBuilder from '../../components/VariantBuilder';
+import PrizeSelect from '../../components/PrizeSelect';
 import { newVariantRows, serializeVariants, shiftNewImageRefs } from '../../utils/variants';
+
+// Mirrors the backend slugify so the admin sees the real product URL.
+function slugPreview(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
 
 function Toggle({ checked, onChange }) {
   return (
@@ -57,7 +63,6 @@ export default function ProductCreatePage({ onNavigate }) {
   const [slug, setSlug]           = useState('');
   const [productVideo, setProductVideo] = useState('');
   const [sku, setSku]             = useState('');
-  const [advanceAmount, setAdvanceAmount] = useState('');
   const [stockAlert, setStockAlert]       = useState('');
 
   // description
@@ -69,13 +74,11 @@ export default function ProductCreatePage({ onNavigate }) {
   const [metaKeyword, setMetaKeyword]     = useState('');
   const [metaDescription, setMetaDescription] = useState('');
 
-  // gift
-  const [giftTitle, setGiftTitle]   = useState('');
-  const [giftPrice, setGiftPrice]   = useState('');
+  // scratch card prizes
+  const [prizeIds, setPrizeIds] = useState([]);
 
   // toggles
   const [status, setStatus]           = useState(true);
-  const [bestDeals, setBestDeals]     = useState(false);
   const [freeShipping, setFreeShipping] = useState(false);
   const [purchaseEnabled, setPurchaseEnabled] = useState(true);
 
@@ -189,17 +192,14 @@ export default function ProductCreatePage({ onNavigate }) {
       if (selectedChild) fd.append('childcategoryId', selectedChild);
       if (selectedBrand) fd.append('brandId', selectedBrand);
       if (productVideo)  fd.append('productVideo', productVideo);
-      if (advanceAmount) fd.append('advanceAmount', advanceAmount);
       if (stockAlert)    fd.append('stockAlert', stockAlert);
       if (description)   fd.append('description', description);
       if (shortDescription) fd.append('shortDescription', shortDescription);
       if (metaTitle)     fd.append('metaTitle', metaTitle);
       if (metaKeyword)   fd.append('metaKeyword', metaKeyword);
       if (metaDescription) fd.append('metaDescription', metaDescription);
-      if (giftTitle)     fd.append('giftTitle', giftTitle);
-      if (giftPrice)     fd.append('giftPrice', giftPrice);
+      fd.append('prizeIds', JSON.stringify(prizeIds));
       fd.append('status',       status       ? 'Active' : 'Inactive');
-      fd.append('bestDeals',    bestDeals    ? 'true' : 'false');
       fd.append('freeShipping', freeShipping ? 'true' : 'false');
       fd.append('purchaseEnabled', purchaseEnabled ? 'true' : 'false');
       if (purchaseEnabled && selectedSupplier) fd.append('supplierId', selectedSupplier);
@@ -255,6 +255,11 @@ export default function ProductCreatePage({ onNavigate }) {
             </FormField>
             <FormField label="Slug" required>
               <input type="text" value={slug} onChange={e => setSlug(e.target.value)} className={inputCls} placeholder="auto-generated" />
+              <p className="mt-1 text-[11px] text-gray-400">
+                {/^[a-z0-9-]*[a-z0-9][a-z0-9-]*$/.test(slugPreview(slug))
+                  ? <>URL: holygift.xyz/product/<span className="font-semibold text-gray-600">{slugPreview(slug)}</span></>
+                  : 'ইংরেজি অক্ষরে লিখুন (যেমন kashmiri-shawl), না হলে product Id দিয়ে URL হবে'}
+              </p>
             </FormField>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -330,9 +335,6 @@ export default function ProductCreatePage({ onNavigate }) {
             </FormField>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <FormField label="Advance Amount">
-              <input type="number" value={advanceAmount} onChange={e => setAdvanceAmount(e.target.value)} className={inputCls} />
-            </FormField>
             <FormField label="Stock Alert">
               <input type="number" value={stockAlert} onChange={e => setStockAlert(e.target.value)} className={inputCls} />
             </FormField>
@@ -447,18 +449,11 @@ export default function ProductCreatePage({ onNavigate }) {
         </div>
       </SectionCard>
 
-      {/* Gift Wrapping */}
-      <SectionCard title="For Gift For Gift Wrapping">
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <FormField label="Title">
-              <input type="text" value={giftTitle} onChange={e => setGiftTitle(e.target.value)} className={inputCls} />
-            </FormField>
-            <FormField label="Price">
-              <input type="number" value={giftPrice} onChange={e => setGiftPrice(e.target.value)} className={inputCls} />
-            </FormField>
-          </div>
-        </div>
+      {/* Scratch Card Prize */}
+      <SectionCard title="Scratch Card Prize">
+        <FormField label="এই product এর সাথে যে prize দেওয়া হবে">
+          <PrizeSelect value={prizeIds} onChange={setPrizeIds} />
+        </FormField>
       </SectionCard>
 
       {/* Toggles + Submit */}
@@ -467,10 +462,6 @@ export default function ProductCreatePage({ onNavigate }) {
           <div className="flex flex-col items-center gap-2">
             <span className="text-xs font-semibold text-gray-600">Status</span>
             <Toggle checked={status} onChange={setStatus} />
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-xs font-semibold text-gray-600">Best Deals</span>
-            <Toggle checked={bestDeals} onChange={setBestDeals} />
           </div>
           <div className="flex flex-col items-center gap-2">
             <span className="text-xs font-semibold text-gray-600">Free Shipping</span>

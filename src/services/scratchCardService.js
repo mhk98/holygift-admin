@@ -2,6 +2,8 @@ import { apiRequest, buildQuery } from "../utils/apiClient";
 
 export const scratchCardService = {
   getAll: (params = {}) => apiRequest(`/scratch-cards${buildQuery(params)}`),
+  // FormData: fullName, phone, address, prize, note, optional "image".
+  create: (formData) => apiRequest("/scratch-cards/create", { method: "POST", body: formData }),
   update: (id, data) => apiRequest(`/scratch-cards/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   getAgents: () => apiRequest("/scratch-cards/agents"),
   assign: (ids, agentId) =>

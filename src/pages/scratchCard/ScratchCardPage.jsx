@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Select from 'react-select';
 import { normalizeCrossProducts } from '../../utils/crossProducts';
-import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
+import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer, Plus } from 'lucide-react';
 import { productService } from '../../services/productService';
 import { scratchCardService, scratchCardPrizeService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
@@ -179,6 +179,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [noteTarget, setNoteTarget] = useState(null);
   const [savingId, setSavingId] = useState(null);
   const [limit, setLimit]       = useState(10);
+  const [creating, setCreating] = useState(false);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -384,9 +385,15 @@ export default function ScratchCardPage({ claimType = 'first' }) {
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
-      <div>
-        <h1 className="text-lg font-bold text-gray-800">{copy.title}</h1>
-        <p className="mt-1 text-xs text-gray-500">{copy.subtitle}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-bold text-gray-800">{copy.title}</h1>
+          <p className="mt-1 text-xs text-gray-500">{copy.subtitle}</p>
+        </div>
+        <button type="button" onClick={() => setCreating(true)}
+          className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
+          <Plus size={14} /> Create Scratch Card
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
@@ -415,7 +422,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   placeholder="Name, phone, prize or ref" className={filterClass} style={{ paddingLeft: '2rem' }} />
               </div>
             </FilterField>
-            {/* Reference finds one claim; phone finds every claim from that number, first and repeat. */}
+            {/* Reference finds one claim; phone finds every claim from that number on this page (first or repeat). */}
             <FilterField label="Reference">
               <input value={reference} onChange={(e) => { setReference(e.target.value); setPage(1); }}
                 placeholder="SC-7K4Q9P" className={`${filterClass} font-mono uppercase`} />
@@ -739,6 +746,14 @@ export default function ScratchCardPage({ claimType = 'first' }) {
       )}
 
       {/* Note modal */}
+      {creating && (
+        <CreateScratchCardModal
+          prizeOptions={prizeOptions}
+          onClose={() => setCreating(false)}
+          onCreated={() => { setCreating(false); setPage(1); fetchRows(); }}
+        />
+      )}
+
       {noteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
@@ -761,6 +776,103 @@ export default function ScratchCardPage({ claimType = 'first' }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const CREATE_INPUT = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400';
+
+// Staff enter a claim by hand; the backend files it as first or repeat by phone.
+function CreateScratchCardModal({ prizeOptions, onClose, onCreated }) {
+  const [form, setForm] = useState({ fullName: '', phone: '', address: '', prize: '', note: '' });
+  const [image, setImage] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (key) => (e) => { setForm((f) => ({ ...f, [key]: e.target.value })); setError(''); };
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const values = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v.trim()]));
+    if (!values.fullName || !values.phone || !values.address || !values.prize) {
+      setError('Name, phone, address আর prize দিতে হবে'); return;
+    }
+    if (!/^01\d{9}$/.test(values.phone)) { setError('Phone 01 দিয়ে শুরু ১১ সংখ্যার হতে হবে'); return; }
+    if (values.address.length < MIN_PATHAO_ADDRESS_LENGTH) {
+      setError(`পুরো ঠিকানা লিখুন — কমপক্ষে ${MIN_PATHAO_ADDRESS_LENGTH} অক্ষর`); return;
+    }
+    const fd = new FormData();
+    Object.entries(values).forEach(([k, v]) => { if (v) fd.append(k, v); });
+    if (image) fd.append('image', image);
+    setSaving(true);
+    try {
+      await scratchCardService.create(fd);
+      onCreated();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="text-base font-bold text-gray-800">Create Scratch Card</h2>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-xs font-semibold text-gray-600 mb-1">Full Name *</span>
+              <input value={form.fullName} onChange={set('fullName')} autoFocus className={CREATE_INPUT} />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-semibold text-gray-600 mb-1">Phone *</span>
+              <input value={form.phone} onChange={set('phone')} placeholder="01XXXXXXXXX" inputMode="numeric" maxLength={11} className={CREATE_INPUT} />
+            </label>
+          </div>
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1">Delivery Address *</span>
+            <textarea value={form.address} onChange={set('address')} rows={2} placeholder="গ্রাম/এলাকা, থানা, জেলা"
+              className={`${CREATE_INPUT} resize-none`} />
+          </label>
+          <div>
+            <span className="block text-xs font-semibold text-gray-600 mb-1">Prize *</span>
+            <Select
+              options={prizeOptions}
+              value={prizeOptions.find((o) => o.value === form.prize) || null}
+              onChange={(o) => { setForm((f) => ({ ...f, prize: o?.value || '' })); setError(''); }}
+              placeholder="Select prize..."
+              menuPortalTarget={document.body}
+              styles={{ menuPortal: (base) => ({ ...base, zIndex: 9999 }), control: (base) => ({ ...base, fontSize: 14, borderRadius: 8 }) }}
+            />
+          </div>
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1">Card Image (optional)</span>
+            <input type="file" accept="image/*" onChange={(e) => setImage(e.target.files[0] || null)}
+              className="block w-full text-xs text-gray-600 file:mr-3 file:rounded file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-xs file:font-semibold hover:file:bg-gray-200" />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1">Note (optional)</span>
+            <textarea value={form.note} onChange={set('note')} rows={2} className={`${CREATE_INPUT} resize-none`} />
+          </label>
+          <p className="text-[11px] text-gray-400">এই phone থেকে আগে claim থাকলে এটা Repeat Scratch Card-এ যাবে।</p>
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose}
+              className="border border-gray-300 text-gray-600 text-sm font-semibold px-5 py-2 rounded-lg hover:bg-gray-50 transition">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white text-sm font-semibold px-6 py-2 rounded-lg transition">
+              {saving ? 'Saving...' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
