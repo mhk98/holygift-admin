@@ -133,7 +133,7 @@ export default function CategoryEditPage({ category, onNavigate }) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Banner Image <span className="text-xs font-normal text-gray-400">(Recommended: 1920 × 480 px)</span></label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Banner Image <span className="text-xs font-normal text-gray-400">(Recommended: 1920 × 1080 px)</span></label>
           <label className="flex items-center border border-gray-300 rounded overflow-hidden cursor-pointer w-full">
             <span className="bg-white border-r border-gray-300 px-3 py-2 text-xs text-gray-600 whitespace-nowrap hover:bg-gray-50 transition">
               Choose file

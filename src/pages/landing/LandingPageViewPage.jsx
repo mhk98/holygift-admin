@@ -63,18 +63,6 @@ function normalizeBangladeshPhone(value) {
   return "";
 }
 
-function trackLandingContactClick(label, value) {
-  void trackMarketingEvent("Contact", {
-    customData: {
-      content_name: label || "Landing contact",
-      content_type: "contact",
-      contact_value: value || "",
-      currency: "BDT",
-      value: 0,
-    },
-  });
-}
-
 const WINNERS = [
   "রাকিবুল ইসলাম",
   "ফারহানা তানিয়া",
@@ -178,7 +166,6 @@ export default function LandingPageViewPage({ campaign, trackingEnabled = true }
   const checkout = useCheckoutSession();
   const incompleteOrderIdRef = useRef(null);
   const incompletePhoneRef = useRef("");
-  const leadTrackedOrderIdRef = useRef(null);
   const viewedCampaignRef = useRef(null);
   const checkoutCampaignRef = useRef(null);
 
@@ -268,10 +255,9 @@ export default function LandingPageViewPage({ campaign, trackingEnabled = true }
     const contentId = String(campaign?.productId || campaign?.Id || "");
     const commonData = {
       content_ids: contentId ? [contentId] : [],
-      content_id: contentId,
       content_type: "product",
       content_name: title,
-      contents: contentId ? [{ content_id: contentId, quantity: 1, price }] : [],
+      contents: contentId ? [{ id: contentId, quantity: 1, item_price: price }] : [],
       value: price,
       currency: "BDT",
     };
@@ -332,9 +318,15 @@ export default function LandingPageViewPage({ campaign, trackingEnabled = true }
   function startCheckout() {
     if (!trackingEnabled || checkoutCampaignRef.current === campaign?.Id) return;
     checkoutCampaignRef.current = campaign?.Id;
+    const items = getSelectedOrderItems();
     void trackMarketingEvent("InitiateCheckout", { enabled: trackingEnabled, customData: {
-      content_ids: getSelectedOrderItems().map((item) => String(item.productId || item.id)),
-      content_type: "product", value: total, currency: "BDT",
+      content_ids: items.map((item) => String(item.productId || item.id)),
+      contents: items.map((item) => ({ id: String(item.productId || item.id), quantity: item.qty, item_price: item.price })),
+      content_name: items.map((item) => item.name).join(", ") || title,
+      content_type: "product",
+      value: items.reduce((sum, item) => sum + item.price * item.qty, 0),
+      currency: "BDT",
+      num_items: items.reduce((sum, item) => sum + item.qty, 0),
     } });
   }
 
@@ -429,7 +421,6 @@ export default function LandingPageViewPage({ campaign, trackingEnabled = true }
     if (!normalizedPhone) {
       incompleteOrderIdRef.current = null;
       incompletePhoneRef.current = "";
-      leadTrackedOrderIdRef.current = null;
       return undefined;
     }
 
@@ -444,20 +435,6 @@ export default function LandingPageViewPage({ campaign, trackingEnabled = true }
         if (draftId) {
           incompleteOrderIdRef.current = draftId;
           incompletePhoneRef.current = normalizedPhone;
-          if (leadTrackedOrderIdRef.current !== draftId) {
-            leadTrackedOrderIdRef.current = draftId;
-            void trackMarketingEvent("Lead", {
-              userData: { name: form.name.trim(), phone: normalizedPhone },
-              customData: {
-                content_ids: getSelectedOrderItems().map((item) => String(item.productId || item.id)).filter(Boolean),
-                content_name: title,
-                content_type: "product",
-                value: total,
-                currency: "BDT",
-                order_id: draft.orderId || draftId,
-              },
-            });
-          }
         }
       } catch (error) {
         console.warn("Incomplete landing order save failed:", error?.message || error);
@@ -504,51 +481,20 @@ export default function LandingPageViewPage({ campaign, trackingEnabled = true }
 
     checkout.submitting.current = true;
     setPlacingOrder(true);
-    const selectedItems = getSelectedOrderItems();
-    const contentId = String(selectedItems[0]?.productId || campaign?.productId || campaign?.Id || "");
-    const trackingData = {
-      content_ids: selectedItems.map((item) => String(item.productId || item.id)).filter(Boolean),
-      content_id: contentId,
-      content_type: "product",
-      content_name: selectedItems.map((item) => item.name).join(", ") || title,
-      contents: selectedItems.map((item) => ({
-        content_id: String(item.productId || item.id),
-        quantity: item.qty,
-        price: item.price,
-      })),
-      value: total,
-      currency: "BDT",
-      num_items: selectedItems.reduce((sum, item) => sum + item.qty, 0),
-    };
-    const trackingUser = { name: form.name.trim(), phone: normalizedPhone };
-
     try {
-      void trackMarketingEvent("AddPaymentInfo", {
-        userData: trackingUser,
-        customData: trackingData,
-      });
       const payload = buildLandingOrderPayload({ phoneNumber: normalizedPhone });
-      payload.landingTracking = { enabled: trackingEnabled, eventSourceUrl: window.location.href, customData: trackingData };
+      // Dashboard previews place real orders; keep them out of Meta's Purchase count.
+      if (!trackingEnabled) payload.trackingDisabled = true;
       const response = await orderService.createOrder(payload);
       const placedOrderData = response.data || payload;
       setPlacedOrder(placedOrderData);
       checkout.complete();
       incompleteOrderIdRef.current = null;
       incompletePhoneRef.current = "";
-      leadTrackedOrderIdRef.current = null;
-      void trackMarketingEvent("Purchase", {
-        enabled: trackingEnabled,
-        eventId: placedOrderData.purchaseEventId,
-        server: !placedOrderData.purchaseEventId,
-        userData: {
-          ...trackingUser,
-          customerId: placedOrderData.customerId || placedOrderData.customer?.Id,
-        },
-        customData: {
-          ...trackingData,
-          order_id: placedOrderData.orderId || placedOrderData.Id,
-        },
-      });
+      if (placedOrderData.purchaseTracking) {
+        const { eventId, ...purchaseData } = placedOrderData.purchaseTracking;
+        void trackMarketingEvent("Purchase", { enabled: trackingEnabled, eventId, customData: purchaseData });
+      }
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       checkout.submitting.current = false;
@@ -1421,7 +1367,6 @@ function RegularLandingTemplate({ data, campaign }) {
           {phone ? (
             <a
               href={`tel:${String(phone).replace(/\s+/g, "")}`}
-              onClick={() => trackLandingContactClick("Landing phone", phone)}
               className="mt-12 inline-flex items-center justify-center rounded-full border-4 border-white px-8 py-3 text-xl font-black shadow"
               style={{ backgroundColor: colors.buttonColor, color: colors.buttonTextColor }}
             >
@@ -3081,7 +3026,6 @@ function Footer({ phone, settings, pages = [] }) {
       href: supportPhone
         ? `tel:${String(supportPhone).replace(/\s+/g, "")}`
         : "#",
-      onClick: () => trackLandingContactClick("Landing footer support", supportPhone),
     },
     { label: "All Products", href: "#products" },
     { label: "Categories", href: "#categories" },

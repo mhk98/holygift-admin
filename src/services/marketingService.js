@@ -12,6 +12,8 @@ export const facebookPixelService = {
   create: (data) => apiRequest("/facebook-pixels/create", { method: "POST", body: JSON.stringify(data) }),
   update: (id, data) => apiRequest(`/facebook-pixels/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id) => apiRequest(`/facebook-pixels/${id}`, { method: "DELETE" }),
+  // Sends a test PageView with the Test Event Code (Events Manager → Test events).
+  test: (id, data = {}) => apiRequest(`/facebook-pixels/${id}/test`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const tiktokPixelService = {

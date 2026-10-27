@@ -1,5 +1,12 @@
 import { apiRequest } from "../utils/apiClient";
 
+// Meta Pixel + Conversions API for the public landing pages served from this app
+// (?landingPageId=…). Mirrors the storefront (holygift-frontend/src/lib/pixel.ts):
+// PageView, ViewContent, AddToCart and InitiateCheckout fire in the browser and
+// are posted to /tracking/events with the same event id. Purchase is sent by the
+// backend from the saved order; the browser only fires its copy with the event id
+// and values the order API returns.
+
 let initializationPromise = null;
 // Dashboard previews must not send real events to the live pixels / Conversions API.
 let trackingSuspended = false;
@@ -7,78 +14,57 @@ let trackingSuspended = false;
 export function setTrackingSuspended(value) {
   trackingSuspended = Boolean(value);
 }
-let trackingConfig = { metaPixels: [], tiktokPixels: [], googleAds: [] };
+let pixelIds = [];
 
-const META_EVENT_NAMES = {
-  PageView: "PageView",
-  ViewContent: "ViewContent",
-  Search: "Search",
-  InitiateCheckout: "InitiateCheckout",
-  AddPaymentInfo: "AddPaymentInfo",
-  AddToCart: "AddToCart",
-  Lead: "Lead",
-  Contact: "Contact",
-  Purchase: "Purchase",
-};
-
-const TIKTOK_EVENT_NAMES = {
-  PageView: "Pageview",
-  ViewContent: "ViewContent",
-  Search: "Search",
-  InitiateCheckout: "InitiateCheckout",
-  AddPaymentInfo: "AddPaymentInfo",
-  AddToCart: "AddToCart",
-  Lead: "SubmitForm",
-  Contact: "Contact",
-  Purchase: "CompletePayment",
-};
-
-const GOOGLE_EVENT_NAMES = {
-  ViewContent: "view_item",
-  Search: "search",
-  AddToCart: "add_to_cart",
-  InitiateCheckout: "begin_checkout",
-  AddPaymentInfo: "add_payment_info",
-  Lead: "generate_lead",
-  Contact: "contact",
-  Purchase: "purchase",
-};
+const SERVER_EVENTS = new Set(["PageView", "ViewContent", "AddToCart", "InitiateCheckout"]);
+const FBC_MAX_AGE_S = 90 * 24 * 60 * 60;
 
 function createEventId(eventName) {
-  if (globalThis.crypto?.randomUUID)
-    return `${eventName}.${globalThis.crypto.randomUUID()}`;
-  return `${eventName}.${Date.now()}.${Math.random().toString(16).slice(2)}`;
+  const random = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  return `${eventName.toLowerCase()}_${random}`;
 }
 
 function getCookie(name) {
   if (typeof document === "undefined") return "";
   const prefix = `${name}=`;
-  return (
-    document.cookie
-      .split(";")
-      .map((part) => part.trim())
-      .find((part) => part.startsWith(prefix))
-      ?.slice(prefix.length) || ""
-  );
+  const value = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix))
+    ?.slice(prefix.length) || "";
+  return value ? decodeURIComponent(value) : "";
 }
 
+// Stores fbclid from a Meta ad click as _fbc (fb.1.<first-seen ms>.<fbclid>);
+// the same fbclid keeps its first timestamp and nothing is written without one.
+function captureFbclid() {
+  if (typeof window === "undefined") return;
+  const fbclid = (new URLSearchParams(window.location.search).get("fbclid") || "").trim();
+  if (!fbclid || !/^[\w-]{10,500}$/.test(fbclid)) return;
+  if (getCookie("_fbc").split(".").slice(3).join(".") === fbclid) return;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `_fbc=fb.1.${Date.now()}.${fbclid}; Max-Age=${FBC_MAX_AGE_S}; Path=/; SameSite=Lax${secure}`;
+}
+
+function attribution() {
+  return { fbp: getCookie("_fbp") || undefined, fbc: getCookie("_fbc") || undefined };
+}
+
+// Attribution saved with an order; the backend re-validates every field.
 function getClickData() {
   if (typeof window === "undefined") return {};
+  captureFbclid();
   const params = new URLSearchParams(window.location.search);
-  const fbclid = params.get("fbclid");
-  const gclid = params.get("gclid");
-  const gbraid = params.get("gbraid");
-  const wbraid = params.get("wbraid");
   return {
-    fbp: getCookie("_fbp") || undefined,
-    fbc:
-      getCookie("_fbc") ||
-      (fbclid ? `fb.1.${Date.now()}.${fbclid}` : undefined),
-    ttp: getCookie("_ttp") || undefined,
+    ...attribution(),
+    eventSourceUrl: window.location.href,
+    gclid: params.get("gclid") || undefined,
+    gbraid: params.get("gbraid") || undefined,
+    wbraid: params.get("wbraid") || undefined,
     ttclid: params.get("ttclid") || undefined,
-    gclid: gclid || undefined,
-    gbraid: gbraid || undefined,
-    wbraid: wbraid || undefined,
+    ttp: getCookie("_ttp") || undefined,
   };
 }
 
@@ -93,6 +79,8 @@ function installMetaPixel() {
     fbq.loaded = true;
     fbq.version = "2.0";
     fbq.queue = [];
+    // PageView is tracked explicitly (with an event id), not on history changes.
+    fbq.disablePushState = true;
     window.fbq = fbq;
     window._fbq = fbq;
   }
@@ -105,103 +93,18 @@ function installMetaPixel() {
   }
 }
 
-function installTiktokPixel() {
-  if (typeof window === "undefined" || window.ttq) return;
-  const ttq = (window.ttq = []);
-  ttq.methods = [
-    "page",
-    "track",
-    "identify",
-    "instances",
-    "debug",
-    "on",
-    "off",
-    "once",
-    "ready",
-    "alias",
-    "group",
-    "enableCookie",
-    "disableCookie",
-    "holdConsent",
-    "revokeConsent",
-    "grantConsent",
-  ];
-  ttq.setAndDefer = (target, method) => {
-    target[method] = (...args) => target.push([method, ...args]);
-  };
-  ttq.methods.forEach((method) => ttq.setAndDefer(ttq, method));
-  ttq.instance = (pixelCode) => {
-    const instance = ttq._i?.[pixelCode] || [];
-    ttq.methods.forEach((method) => ttq.setAndDefer(instance, method));
-    return instance;
-  };
-  ttq.load = (pixelCode, options = {}) => {
-    ttq._i = ttq._i || {};
-    ttq._i[pixelCode] = [];
-    ttq._i[pixelCode]._u = "https://analytics.tiktok.com/i18n/pixel/events.js";
-    ttq._t = ttq._t || {};
-    ttq._t[pixelCode] = Date.now();
-    ttq._o = ttq._o || {};
-    ttq._o[pixelCode] = options;
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = `${ttq._i[pixelCode]._u}?sdkid=${encodeURIComponent(pixelCode)}&lib=ttq`;
-    script.dataset.holydeenTiktokPixel = pixelCode;
-    document.head.appendChild(script);
-  };
-}
-
-function installGoogleTag(conversionId) {
-  if (typeof window === "undefined") return;
-  window.dataLayer = window.dataLayer || [];
-  window.gtag =
-    window.gtag ||
-    function gtag() {
-      window.dataLayer.push(arguments);
-    };
-  if (!document.querySelector("script[data-holydeen-google-tag]")) {
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(conversionId)}`;
-    script.dataset.holydeenGoogleTag = "true";
-    document.head.appendChild(script);
-    window.gtag("js", new Date());
-  }
-}
-
 export async function initializeTracking() {
   if (initializationPromise) return initializationPromise;
+  captureFbclid();
   initializationPromise = apiRequest("/tracking/config")
     .then((response) => {
-      trackingConfig = {
-        metaPixels: Array.isArray(response?.data?.metaPixels)
-          ? response.data.metaPixels
-          : [],
-        tiktokPixels: Array.isArray(response?.data?.tiktokPixels)
-          ? response.data.tiktokPixels
-          : [],
-        googleAds: Array.isArray(response?.data?.googleAds)
-          ? response.data.googleAds
-          : [],
-      };
-
-      if (trackingConfig.metaPixels.length) {
+      const metaPixels = Array.isArray(response?.data?.metaPixels) ? response.data.metaPixels : [];
+      pixelIds = [...new Set(metaPixels.map((pixel) => pixel.pixelsId).filter(Boolean))];
+      if (pixelIds.length) {
         installMetaPixel();
-        trackingConfig.metaPixels.forEach((pixel) =>
-          window.fbq("init", pixel.pixelsId),
-        );
+        pixelIds.forEach((id) => window.fbq("init", id));
       }
-      if (trackingConfig.tiktokPixels.length) {
-        installTiktokPixel();
-        trackingConfig.tiktokPixels.forEach((pixel) =>
-          window.ttq.load(pixel.pixelCode),
-        );
-      }
-      trackingConfig.googleAds.forEach((config, index) => {
-        if (index === 0) installGoogleTag(config.conversionId);
-        window.gtag?.("config", config.conversionId);
-      });
-      return trackingConfig;
+      return { metaPixels };
     })
     .catch((error) => {
       initializationPromise = null;
@@ -210,80 +113,47 @@ export async function initializeTracking() {
   return initializationPromise;
 }
 
+// trackSingle targets each configured pixel explicitly.
 function trackInBrowser(eventName, eventId, customData) {
-  const metaEventName = META_EVENT_NAMES[eventName] || eventName;
-  trackingConfig.metaPixels.forEach((pixel) => {
-    window.fbq?.("trackSingle", pixel.pixelsId, metaEventName, customData, {
-      eventID: eventId,
-    });
+  pixelIds.forEach((id) => {
+    window.fbq?.("trackSingle", id, eventName, customData, { eventID: eventId });
   });
-
-  const tiktokEventName = TIKTOK_EVENT_NAMES[eventName] || eventName;
-  trackingConfig.tiktokPixels.forEach((pixel) => {
-    window.ttq
-      ?.instance(pixel.pixelCode)
-      ?.track(tiktokEventName, { ...customData, event_id: eventId });
-  });
-
-  if (eventName === "Purchase") {
-    trackingConfig.googleAds.forEach((config) => {
-      if (!config.conversionId || !config.conversionLabel) return;
-      window.gtag?.("event", "conversion", {
-        send_to: `${config.conversionId}/${config.conversionLabel}`,
-        value: customData.value,
-        currency: customData.currency || "BDT",
-        transaction_id: customData.order_id || eventId,
-      });
-    });
-  }
-
-  const googleEventName = GOOGLE_EVENT_NAMES[eventName];
-  if (googleEventName) {
-    trackingConfig.googleAds.forEach((config) => {
-      if (!config.conversionId) return;
-      window.gtag?.("event", googleEventName, {
-        value: customData.value,
-        currency: customData.currency || "BDT",
-        items: (customData.content_ids || []).map((item) => ({
-          item_id: String(item),
-          item_name: customData.content_name || "",
-          quantity: customData.num_items || 1,
-        })),
-      });
-    });
-  }
 }
 
 export function getTrackingClickData() {
   return getClickData();
 }
 
+/**
+ * @param {"PageView"|"ViewContent"|"AddToCart"|"InitiateCheckout"|"Purchase"} eventName
+ *   Purchase needs the `eventId` from the order API and is never posted to the server.
+ */
 export async function trackMarketingEvent(
   eventName,
-  { userData = {}, customData = {}, eventId: suppliedEventId, server = true, enabled = true } = {},
+  { customData = {}, eventId: suppliedEventId, enabled = true } = {},
 ) {
   if (!enabled || trackingSuspended) return null;
+  const isPurchase = eventName === "Purchase";
+  if (!isPurchase && !SERVER_EVENTS.has(eventName)) return null;
+  if (isPurchase && !suppliedEventId) return null;
   try {
     await initializeTracking();
-    if (!enabled || trackingSuspended) return null;
+    if (trackingSuspended) return null;
+    captureFbclid();
     const eventId = suppliedEventId || createEventId(eventName);
     trackInBrowser(eventName, eventId, customData);
-    if (!server) return eventId;
-    const clickData = getClickData();
-    const response = await apiRequest("/tracking/events", {
+    if (isPurchase) return eventId;
+    await apiRequest("/tracking/events", {
       method: "POST",
       body: JSON.stringify({
         eventName,
         eventId,
         eventSourceUrl: window.location.href,
-        referrerUrl: document.referrer || undefined,
-        userData: { ...userData, ...clickData },
-        customData,
+        attribution: attribution(),
+        customData: eventName === "PageView" ? undefined : customData,
       }),
     });
-    const failures = response?.data?.results?.filter((item) => !item.ok && !item.skipped) || [];
-    if (failures.length) console.warn('Marketing delivery failed', failures.map(({ platform, status }) => ({ platform, status })));
-    return failures.length ? null : eventId;
+    return eventId;
   } catch (error) {
     console.warn(`Marketing event "${eventName}" failed`, error);
     return null;
@@ -292,5 +162,5 @@ export async function trackMarketingEvent(
 
 export function resetTrackingForTests() {
   initializationPromise = null;
-  trackingConfig = { metaPixels: [], tiktokPixels: [], googleAds: [] };
+  pixelIds = [];
 }

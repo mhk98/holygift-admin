@@ -6,7 +6,8 @@ export default function FacebookPixelsFormPage({ mode = 'create', pixel, onSave,
   const isEdit = mode === 'edit';
   const [form, setForm] = useState({
     pixelsId:        pixel?.pixelsId        ?? '',
-    metaAccessToken: pixel?.metaAccessToken ?? '',
+    // The saved token is never sent back; leave blank on edit to keep it.
+    metaAccessToken: '',
     testEventId:     pixel?.testEventId     ?? '',
     status:          pixel?.status          ?? 'Active',
   });
@@ -17,7 +18,8 @@ export default function FacebookPixelsFormPage({ mode = 'create', pixel, onSave,
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      const payload = { pixelsId: form.pixelsId.trim(), metaAccessToken: form.metaAccessToken.trim(), testEventId: form.testEventId.trim(), status: form.status };
+      const payload = { pixelsId: form.pixelsId.trim(), testEventId: form.testEventId.trim(), status: form.status };
+      if (form.metaAccessToken.trim()) payload.metaAccessToken = form.metaAccessToken.trim();
       if (isEdit) { await facebookPixelService.update(pixel.Id, payload); }
       else         { await facebookPixelService.create(payload); }
       onSave?.({ ...payload, id: pixel?.Id });
@@ -44,11 +46,20 @@ export default function FacebookPixelsFormPage({ mode = 'create', pixel, onSave,
       <div className="mx-auto max-w-5xl rounded bg-white p-6 shadow-sm">
         {error && <div className="mb-4 px-4 py-2 bg-red-50 border border-red-200 text-red-600 text-xs rounded">{error}</div>}
         <form onSubmit={handleSubmit}>
-          {[['pixelsId', 'Pixels ID', true], ['metaAccessToken', 'Meta Access Token', true], ['testEventId', 'Test Event Code', false]].map(([key, label, req]) => (
+          {[
+            ['pixelsId', 'Pixels ID', true, '', ''],
+            ['metaAccessToken', 'Meta Access Token', !isEdit || !pixel?.hasAccessToken,
+              isEdit && pixel?.hasAccessToken ? `Saved (${pixel.accessTokenMasked}) — leave blank to keep it` : '',
+              'Stored encrypted on the server and never shown again. Enter a new token to replace it.'],
+            ['testEventId', 'Test Event Code', false, 'e.g. TEST12345',
+              'Only used by the "Test" button on the Pixels list; live traffic is never sent in test mode.'],
+          ].map(([key, label, req, placeholder, hint]) => (
             <label key={key} className="mb-6 block">
               <span className="mb-2 block text-sm font-semibold text-gray-500">{label} {req && '*'}</span>
-              <input type={key === 'metaAccessToken' ? 'password' : 'text'} autoComplete="off" required={req} value={form[key]} onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+              <input type={key === 'metaAccessToken' ? 'password' : 'text'} autoComplete="off" required={req} value={form[key]} placeholder={placeholder}
+                onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
                 className="h-9 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+              {hint && <span className="mt-1 block text-[11px] text-gray-400">{hint}</span>}
             </label>
           ))}
           <label className="mb-6 block">

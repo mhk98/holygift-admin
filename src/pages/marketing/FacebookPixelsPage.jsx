@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Copy, FileText, Pencil, PlayCircle, Printer, ThumbsUp, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
+import { Copy, FileText, Pencil, PlayCircle, Printer, Send, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { facebookPixelService } from '../../services/marketingService';
 
 export default function FacebookPixelsPage({ onCreate, onEdit }) {
@@ -10,6 +10,7 @@ export default function FacebookPixelsPage({ onCreate, onEdit }) {
   const [page, setPage]       = useState(1);
   const [meta, setMeta]       = useState({});
   const [sort, setSort]       = useState({ key: 'pixelsId', dir: 'asc' });
+  const [testingId, setTestingId] = useState(null);
   const limit = 20;
 
   const fetchItems = useCallback(async () => {
@@ -27,6 +28,22 @@ export default function FacebookPixelsPage({ onCreate, onEdit }) {
     if (!window.confirm('Delete this pixel?')) return;
     try { await facebookPixelService.delete(item.Id); fetchItems(); }
     catch (err) { alert(err.message); }
+  }
+
+  async function handleTest(item) {
+    setTestingId(item.Id);
+    try {
+      const res = await facebookPixelService.test(item.Id);
+      const r = res.data || {};
+      alert(r.ok
+        ? `Test event sent to pixel ${r.pixelId} (events received: ${r.eventsReceived}).\nOpen Events Manager → Test events with code ${r.testEventCode} to see it.`
+        : `Meta rejected the test event:\n${r.error}`);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setTestingId(null);
+      fetchItems();
+    }
   }
 
   function toggleSort(key) {
@@ -72,14 +89,16 @@ export default function FacebookPixelsPage({ onCreate, onEdit }) {
               <tr className="border-b border-gray-200 bg-slate-100">
                 <th className="px-4 py-4 text-left font-semibold text-gray-500 w-28">SL</th>
                 <SortableHeader label="Pixels ID" sortKey="pixelsId" sort={sort} onSort={toggleSort} />
-                <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} className="w-64" />
+                <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} className="w-40" />
+                <th className="px-4 py-4 text-left font-semibold text-gray-500">Access Token</th>
+                <th className="px-4 py-4 text-left font-semibold text-gray-500">Server Delivery</th>
                 <th className="px-4 py-4 text-left font-semibold text-gray-500">Action</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>}
-              {!loading && error && <tr><td colSpan={4} className="px-4 py-8 text-center text-red-400">{error}</td></tr>}
-              {!loading && !error && sorted.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400 bg-gray-50">No data available</td></tr>}
+              {loading && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>}
+              {!loading && error && <tr><td colSpan={6} className="px-4 py-8 text-center text-red-400">{error}</td></tr>}
+              {!loading && !error && sorted.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 bg-gray-50">No data available</td></tr>}
               {!loading && sorted.map((item, i) => (
                 <tr key={item.Id} className="border-b border-gray-100 bg-gray-50 transition hover:bg-gray-100/70">
                   <td className="px-4 py-4 text-gray-600">{(page - 1) * limit + i + 1}</td>
@@ -87,9 +106,12 @@ export default function FacebookPixelsPage({ onCreate, onEdit }) {
                   <td className="px-4 py-4">
                     <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${item.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-rose-100 text-rose-500'}`}>{item.status}</span>
                   </td>
+                  <td className="px-4 py-4 font-mono text-xs text-gray-500">{item.accessTokenMasked || <span className="font-sans text-rose-500">Missing</span>}</td>
+                  <td className="px-4 py-4 text-xs"><DeliveryStatus item={item} /></td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-3">
-                      <button type="button" title="Details" className="flex h-7 w-8 items-center justify-center rounded bg-teal-500 text-white transition hover:bg-teal-600"><ThumbsUp size={13} /></button>
+                      <button type="button" title="Send test event" onClick={() => handleTest(item)} disabled={testingId === item.Id}
+                        className="flex h-7 w-8 items-center justify-center rounded bg-teal-500 text-white transition hover:bg-teal-600 disabled:opacity-50"><Send size={13} /></button>
                       <button type="button" title="Edit" onClick={() => onEdit && onEdit(item)} className="flex h-7 w-8 items-center justify-center rounded bg-indigo-600 text-white transition hover:bg-indigo-700"><Pencil size={13} /></button>
                       <button type="button" title="Delete" onClick={() => handleDelete(item)} className="flex h-7 w-8 items-center justify-center rounded bg-rose-500 text-white transition hover:bg-rose-600"><Trash2 size={13} /></button>
                     </div>
@@ -111,6 +133,24 @@ export default function FacebookPixelsPage({ onCreate, onEdit }) {
       </div>
     </div>
   );
+}
+
+const formatTime = (value) => (value ? new Date(value).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : null);
+
+// Last Conversions API result for the pixel: success time, or the latest error if it is newer.
+function DeliveryStatus({ item }) {
+  const ok = item.lastSuccessAt ? new Date(item.lastSuccessAt).getTime() : 0;
+  const bad = item.lastErrorAt ? new Date(item.lastErrorAt).getTime() : 0;
+  if (!ok && !bad) return <span className="text-gray-400">No events yet</span>;
+  if (bad > ok) {
+    return (
+      <div className="max-w-xs">
+        <span className="font-semibold text-rose-600">Error · {formatTime(item.lastErrorAt)}</span>
+        <div className="mt-0.5 truncate text-gray-500" title={item.lastError}>{item.lastError}</div>
+      </div>
+    );
+  }
+  return <span className="font-semibold text-green-700">OK · {formatTime(item.lastSuccessAt)}</span>;
 }
 
 function SortableHeader({ label, sortKey, sort, onSort, className = '' }) {
