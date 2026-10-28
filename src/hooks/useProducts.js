@@ -5,7 +5,6 @@ import {
   subcategoryService,
   childcategoryService,
   brandService,
-  colorService,
   attributeService,
   reviewService,
 } from "../services/productService";
@@ -60,10 +59,6 @@ export function useChildcategories(params = {}) {
 
 export function useBrands(params = {}) {
   return useResourceList(brandService.getAll, params);
-}
-
-export function useColors(params = {}) {
-  return useResourceList(colorService.getAll, params);
 }
 
 export function useAttributes(params = {}) {

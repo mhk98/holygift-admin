@@ -5,14 +5,13 @@ import {
   subcategoryService,
   childcategoryService,
   brandService,
-  colorService,
   attributeService,
   productService,
 } from "../../services/productService";
 import { supplierService } from "../../services/supplierService";
 import RichEditor from "../../components/RichEditor";
 import VariantBuilder from "../../components/VariantBuilder";
-import PrizeSelect from "../../components/PrizeSelect";
+import GiftProductSelect from "../../components/GiftProductSelect";
 import { variantsFromProduct, serializeVariants, clearImageRef, shiftNewImageRefs } from "../../utils/variants";
 import { apiRequest } from "../../utils/apiClient";
 import { imageUrl } from "../../utils/assetUrl";
@@ -95,7 +94,7 @@ export default function ProductEditPage({ product, onNavigate }) {
   );
 
   // ----- gift -----
-  const [prizeIds, setPrizeIds] = useState(() => parsePrizeIds(product?.prizeIds));
+  const [giftProductIds, setGiftProductIds] = useState(() => parsePrizeIds(product?.giftProductIds));
 
   // ----- toggles -----
   const [status, setStatus] = useState(product?.status !== "Inactive");
@@ -130,7 +129,6 @@ export default function ProductEditPage({ product, onNavigate }) {
   const [subcategories, setSubcategories] = useState([]);
   const [childcats, setChildcats] = useState([]);
   const [brands, setBrands] = useState([]);
-  const [colors, setColors] = useState([]);
   const [attributes, setAttributes] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
 
@@ -165,10 +163,6 @@ export default function ProductEditPage({ product, onNavigate }) {
     brandService
       .getAllList()
       .then((r) => setBrands(r.data || []))
-      .catch(() => {});
-    colorService
-      .getAllList()
-      .then((r) => setColors(r.data || []))
       .catch(() => {});
     attributeService
       .getAllList()
@@ -271,7 +265,7 @@ export default function ProductEditPage({ product, onNavigate }) {
       if (metaTitle) fd.append("metaTitle", metaTitle);
       if (metaKeyword) fd.append("metaKeyword", metaKeyword);
       if (metaDescription) fd.append("metaDescription", metaDescription);
-      fd.append("prizeIds", JSON.stringify(prizeIds));
+      fd.append("giftProductIds", JSON.stringify(giftProductIds));
       fd.append("status", status ? "Active" : "Inactive");
       fd.append("freeShipping", freeShipping ? "true" : "false");
       fd.append("purchaseEnabled", purchaseEnabled ? "true" : "false");
@@ -562,7 +556,6 @@ export default function ProductEditPage({ product, onNavigate }) {
       <SectionCard title="Price & Variation">
         <VariantBuilder
           attributes={attributes}
-          colors={colors}
           images={[
             ...keptImages.map((filename) => ({ ref: filename, src: imageUrl(filename) })),
             ...newImagePreviews.map((src, i) => ({ ref: `new:${i}`, src })),
@@ -663,10 +656,10 @@ export default function ProductEditPage({ product, onNavigate }) {
         </div>
       </SectionCard>
 
-      {/* Scratch Card Prize */}
-      <SectionCard title="Scratch Card Prize">
-        <FormField label="এই product এর সাথে যে prize দেওয়া হবে">
-          <PrizeSelect value={prizeIds} onChange={setPrizeIds} />
+      {/* Gift Products */}
+      <SectionCard title="Gift Product">
+        <FormField label="এই product এর সাথে যে product উপহার দেওয়া হবে">
+          <GiftProductSelect value={giftProductIds} onChange={setGiftProductIds} excludeId={product?.Id} />
         </FormField>
       </SectionCard>
 

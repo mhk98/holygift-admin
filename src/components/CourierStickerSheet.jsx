@@ -1,15 +1,16 @@
 import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import JsBarcode from 'jsbarcode';
-import { crossProductStickerText, crossProductCollectionTotal } from '../../utils/crossProducts';
+import { codAmount } from '../utils/codAmount';
 
 const STORE = { name: 'HOLY GIFT 4', hub: 'Central Inbound', contact: '09639279033' };
-const codAmount = (value) => `BDT ${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function PathaoStickerSheet({ cards }) {
+// 75×50mm thermal courier stickers. Each sticker:
+// { key, courier, consignment, name, phone, cod (number | null), reference, lines: string[], warning }
+export default function CourierStickerSheet({ stickers }) {
   return createPortal(
     <div className="pathao-sticker-print-area">
-      {cards.map((card) => <PathaoSticker key={card.Id} card={card} />)}
+      {stickers.map((sticker) => <CourierSticker key={sticker.key} sticker={sticker} />)}
       <style>{`
         .pathao-sticker-print-area {
           position: fixed; left: -10000px; top: 0; visibility: hidden;
@@ -27,6 +28,7 @@ export default function PathaoStickerSheet({ cards }) {
         .pathao-sticker__header { display: flex; align-items: center; gap: 3mm; flex-shrink: 0; }
         .pathao-sticker__brand { display: flex; flex-direction: column; align-items: center; width: 14mm; flex-shrink: 0; }
         .pathao-sticker__official-logo { display: block; width: 11mm; height: 11mm; color: #6d6e70; }
+        .pathao-sticker__steadfast-logo { display: block; width: 10mm; height: 10mm; color: #000; }
         .pathao-sticker__brand-label { margin-top: 0.4mm; font-size: 2.6mm; font-style: italic; color: #333; }
         .pathao-sticker__courier-name { font-size: 3.2mm; font-weight: 700; }
         .pathao-sticker__store { min-width: 0; }
@@ -51,15 +53,14 @@ export default function PathaoStickerSheet({ cards }) {
   );
 }
 
-function PathaoSticker({ card }) {
+function CourierSticker({ sticker }) {
   const barcodeRef = useRef(null);
   const bodyRef = useRef(null);
-  const consignment = card.consignmentId || card.trackingCode || '';
-  const crossProducts = crossProductStickerText(card.crossProducts);
-  const total = crossProductCollectionTotal(card);
-  const bookedCod = card.courier ? Number(card.courierCodAmount ?? card.codAmount ?? 0) : null;
-  const mismatch = bookedCod != null && total !== bookedCod;
-  const isPathao = String(card.courier || 'Pathao').toLowerCase() === 'pathao';
+  const { consignment = '', lines = [] } = sticker;
+  const courierKey = String(sticker.courier || 'Pathao').toLowerCase();
+  const isPathao = courierKey === 'pathao';
+  const isSteadfast = courierKey === 'steadfast';
+  const contentKey = JSON.stringify([sticker.name, sticker.phone, sticker.cod, sticker.reference, lines, sticker.warning]);
 
   useLayoutEffect(() => {
     if (!barcodeRef.current || !consignment) return;
@@ -71,7 +72,7 @@ function PathaoSticker({ card }) {
     barcodeRef.current.removeAttribute('height');
   }, [consignment]);
 
-  // Long names, prizes or cross products shrink the text instead of being cut off.
+  // Long names, addresses or product lists shrink the text instead of being cut off.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -81,10 +82,10 @@ function PathaoSticker({ card }) {
       size -= 0.1;
       body.style.fontSize = `${size}mm`;
     }
-  }, [crossProducts, card.fullName, card.phone, card.prize, card.referenceCode, mismatch, bookedCod]);
+  }, [contentKey]);
 
   return (
-    <section className="pathao-sticker" aria-label={`Courier sticker ${card.referenceCode}`}>
+    <section className="pathao-sticker" aria-label={`Courier sticker ${sticker.reference}`}>
       <header className="pathao-sticker__header">
         <div className="pathao-sticker__brand">
           {isPathao ? (
@@ -98,8 +99,21 @@ function PathaoSticker({ card }) {
               </svg>
               <span className="pathao-sticker__brand-label">merchant</span>
             </>
+          ) : isSteadfast ? (
+            <>
+              {/* Official Steadfast kite mark in its mono-black variant, inline for reliable thermal printing.
+                  Source: the sf-logo SVG on https://steadfast.com.bd */}
+              <svg className="pathao-sticker__steadfast-logo" viewBox="303 831 338 338" role="img" aria-label="Steadfast">
+                <path d="M640.36,856.8v170.38c0,4.02-5.75,4.71-6.69.8-9.97-41.71-30.1-79.47-57.65-110.5-1.2-1.35-1.15-3.38.12-4.66l58.42-58.42c2.14-2.14,5.8-.62,5.8,2.4Z" fill="currentColor"/>
+                <path d="M617.45,837.29l-58.43,58.42c-1.27,1.27-3.31,1.32-4.66.12-31.03-27.55-68.79-47.69-110.5-57.65-3.91-.93-3.23-6.69.8-6.69h170.39c3.03,0,4.54,3.66,2.4,5.8Z" fill="currentColor"/>
+                <path d="M537.08,917.65l-147.3,147.3c-2.14,2.14-5.8.62-5.8-2.4v-203.78c0-1.89,1.55-3.44,3.44-3.41,57.22.83,109.43,22.32,149.52,57.34,1.48,1.29,1.54,3.58.15,4.96Z" fill="currentColor"/>
+                <path d="M613.1,1087.86h-203.8c-3.03,0-4.54-3.66-2.4-5.8l147.3-147.3c1.39-1.39,3.67-1.33,4.96.15,35.02,40.09,56.52,92.29,57.35,149.52.03,1.89-1.52,3.44-3.41,3.44Z" fill="currentColor"/>
+                <path d="M383.97,1091.26v73.85c0,3.03-3.66,4.54-5.8,2.4l-28.36-28.36-45.49-45.49c-2.14-2.14-.62-5.8,2.4-5.8h73.85c1.88,0,3.4,1.52,3.4,3.4Z" fill="currentColor"/>
+              </svg>
+              <span className="pathao-sticker__brand-label">steadfast</span>
+            </>
           ) : (
-            <span className="pathao-sticker__courier-name">{String(card.courier).toUpperCase()}</span>
+            <span className="pathao-sticker__courier-name">{String(sticker.courier).toUpperCase()}</span>
           )}
         </div>
         <div className="pathao-sticker__store">
@@ -111,16 +125,15 @@ function PathaoSticker({ card }) {
       </header>
       <svg ref={barcodeRef} className="pathao-sticker__barcode" aria-label={`Barcode ${consignment}`} />
       <div ref={bodyRef} className="pathao-sticker__body">
-        <p className="pathao-sticker__name">{card.fullName}</p>
+        <p className="pathao-sticker__name">{sticker.name}</p>
         <p className="pathao-sticker__phone-row">
-          <span>{card.phone}</span>
+          <span>{sticker.phone}</span>
           <span>|</span>
-          <span className="pathao-sticker__cod">COD: {total == null ? 'Price required' : codAmount(total)}</span>
+          <span className="pathao-sticker__cod">COD: {sticker.cod == null ? 'Price required' : codAmount(sticker.cod)}</span>
         </p>
-        <p>Order ID: {card.referenceCode}</p>
-        <p>{card.prize}</p>
-        {crossProducts && <p>Cross: {crossProducts}</p>}
-        {mismatch && <p className="pathao-sticker__mismatch">Courier booked: {codAmount(bookedCod)} — update required</p>}
+        <p>Order ID: {sticker.reference}</p>
+        {lines.filter(Boolean).map((line, index) => <p key={index}>{line}</p>)}
+        {sticker.warning && <p className="pathao-sticker__mismatch">{sticker.warning}</p>}
       </div>
     </section>
   );

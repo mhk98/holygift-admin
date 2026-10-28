@@ -15,7 +15,6 @@ import CategoriesPage from "./pages/products/CategoriesPage";
 import SubcategoriesPage from "./pages/products/SubcategoriesPage";
 import ChildCategoriesPage from "./pages/products/ChildCategoriesPage";
 import BrandsPage from "./pages/products/BrandsPage";
-import ColorsPage from "./pages/products/ColorsPage";
 import AttributePage from "./pages/products/AttributePage";
 import AttributeFormPage from "./pages/products/AttributeFormPage";
 import BarcodePage from "./pages/products/BarcodePage";
@@ -31,8 +30,6 @@ import ChildcategoryCreatePage from "./pages/products/ChildcategoryCreatePage";
 import ChildcategoryEditPage from "./pages/products/ChildcategoryEditPage";
 import BrandCreatePage from "./pages/products/BrandCreatePage";
 import BrandEditPage from "./pages/products/BrandEditPage";
-import ColorCreatePage from "./pages/products/ColorCreatePage";
-import ColorEditPage from "./pages/products/ColorEditPage";
 import PurchaseListPage from "./pages/purchase/PurchaseListPage";
 import PurchaseFormPage from "./pages/purchase/PurchaseFormPage";
 import SupplierListPage from "./pages/supplier/SupplierListPage";
@@ -159,7 +156,6 @@ const PERSISTABLE_PAGES = new Set([
   "create_subcategory",
   "create_childcategory",
   "create_brand",
-  "create_color",
   "create_attribute",
   "create_review",
   "supplier",
@@ -193,7 +189,6 @@ const TRANSIENT_PAGE_FALLBACKS = {
     activeProductPage: "childcategories",
   },
   edit_brand: { activePage: "products", activeProductPage: "brands" },
-  edit_color: { activePage: "products", activeProductPage: "colors" },
   edit_attribute: { activePage: "products", activeProductPage: "attribute" },
   edit_review: { activePage: "products", activeProductPage: "reviews" },
 };
@@ -245,7 +240,6 @@ const PRODUCT_CREATE_ROUTES = {
   create_subcategory: "/products/subcategories/create",
   create_childcategory: "/products/childcategories/create",
   create_brand: "/products/brands/create",
-  create_color: "/products/colors/create",
   create_attribute: "/products/attribute/create",
   create_review: "/products/reviews/create",
 };
@@ -266,7 +260,6 @@ const NAVIGATION_ROUTE_GROUPS = {
       subcategories: "subcategories",
       childcategories: "childcategories",
       brands: "brands",
-      colors: "colors",
       attribute: "attribute",
       barcode: "barcode",
       reviews: "reviews",
@@ -802,7 +795,6 @@ function App() {
   const [selectedSubcategory, setSelectedSubcategory] = useState(null);
   const [selectedChildcategory, setSelectedChildcategory] = useState(null);
   const [selectedBrand, setSelectedBrand] = useState(null);
-  const [selectedColor, setSelectedColor] = useState(null);
   const [selectedAttribute, setSelectedAttribute] = useState(null);
   const [selectedReview, setSelectedReview] = useState(null);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
@@ -1769,22 +1761,6 @@ function App() {
         />
       );
     }
-    if (activePage === "create_color") {
-      return (
-        <ColorCreatePage onNavigate={(page) => goProducts(page || "colors")} />
-      );
-    }
-    if (activePage === "edit_color" && selectedColor) {
-      return (
-        <ColorEditPage
-          color={selectedColor}
-          onNavigate={(page) => {
-            goProducts(page || "colors");
-            setSelectedColor(null);
-          }}
-        />
-      );
-    }
     if (activePage === "create_attribute") {
       return (
         <AttributeFormPage
@@ -2112,17 +2088,6 @@ function App() {
             onEditBrand={(b) => {
               setSelectedBrand(b);
               setActivePage("edit_brand");
-            }}
-          />
-        );
-      }
-      if (activeProductPage === "colors") {
-        return (
-          <ColorsPage
-            onNavigate={setActivePage}
-            onEditColor={(c) => {
-              setSelectedColor(c);
-              setActivePage("edit_color");
             }}
           />
         );

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Select from 'react-select';
 import { normalizeCrossProducts } from '../../utils/crossProducts';
 import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer, Plus } from 'lucide-react';
@@ -6,7 +6,7 @@ import { productService } from '../../services/productService';
 import { scratchCardService, scratchCardPrizeService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
 import { useAuth } from '../../context/AuthContext';
-import PathaoStickerSheet from './PathaoStickerSheet';
+import ScratchCardStickerSheet from './ScratchCardStickerSheet';
 
 // Statuses set by hand; must match SCRATCH_CARD_STATUSES in the backend. Once a
 // card is sent to Steadfast/Pathao its status is the courier's own.
@@ -19,7 +19,7 @@ const STATUS_STYLES = {
   'Not Responding': 'bg-gray-100 text-gray-700 border-gray-300',
   Delivered: 'bg-green-50 text-green-700 border-green-200',
 };
-const COURIERS_FOR_FILTER = ['Steadfast', 'Pathao'];
+const COURIERS_FOR_FILTER = ['Pathao', 'Steadfast'];
 
 // The prizes on the storefront form, managed under Scratch Card > Prizes.
 // Loaded once per session; the filter and prize editor share the request.
@@ -38,24 +38,21 @@ function usePrizeOptions() {
 }
 
 // Courier status filter values, matching courierStatusCondition in the backend.
-const COURIER_FILTER_BASE = [
-  {
-    label: 'Courier',
-    options: [
-      { value: 'none', label: 'Not sent to courier' },
-      ...COURIERS_FOR_FILTER.map((c) => ({ value: `courier:${c}`, label: `Sent to ${c}` })),
-    ],
-  },
-  {
-    label: 'Stage',
-    options: [
-      { value: 'stage:in_courier', label: 'In Courier' },
-      { value: 'stage:on_hold', label: 'On Hold' },
-      { value: 'stage:delivered', label: 'Delivered' },
-      { value: 'stage:returned', label: 'Returned' },
-      { value: 'stage:cancelled', label: 'Cancelled' },
-    ],
-  },
+// Each courier has its own field, so every value is scoped to that courier.
+const NOT_SENT = '__not_sent';
+const COURIER_STAGES = [
+  { stage: 'in_courier', label: 'In Courier' },
+  { stage: 'on_hold', label: 'On Hold' },
+  { stage: 'delivered', label: 'Delivered' },
+  { stage: 'returned', label: 'Returned' },
+  { stage: 'cancelled', label: 'Cancelled' },
+];
+const courierFilterOptions = (courier, statuses = []) => [
+  { label: 'Courier', options: [{ value: `courier:${courier}`, label: `All sent to ${courier}` }] },
+  { label: 'Stage', options: COURIER_STAGES.map(({ stage, label }) => ({ value: `courierStage:${courier}:${stage}`, label })) },
+  ...(statuses.length
+    ? [{ label: `${courier} Status`, options: statuses.map((st) => ({ value: `courierStatus:${courier}:${st}`, label: st })) }]
+    : []),
 ];
 
 // react-select sized to match the other h-9 filter inputs.
@@ -80,6 +77,16 @@ const FILTER_SELECT_STYLES = {
 const COURIER_STATUS_STYLE = 'bg-violet-50 text-violet-700 border-violet-200';
 
 // Filter rows: auto-fit fills the width and wraps on narrow screens.
+const DELIVERY_AREA_OPTIONS = [
+  { value: 'inside', label: 'ঢাকার ভিতরে' },
+  { value: 'outside', label: 'ঢাকার বাইরে' },
+];
+// Shown above the product list in the Cross Product filter.
+const CROSS_PRODUCT_PRESENCE_OPTIONS = [
+  { value: 'any', label: 'With cross products' },
+  { value: 'none', label: 'Without cross products' },
+];
+
 const FILTER_ROW_FIELDS = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
@@ -168,7 +175,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [status, setStatus]     = useState('');
   const [crossProductId, setCrossProductId] = useState('');
   const [prize, setPrize]       = useState('');
-  const [courierStatus, setCourierStatus] = useState([]);
+  const [deliveryArea, setDeliveryArea] = useState('');
+  const [courierStatus, setCourierStatus] = useState({ Pathao: [], Steadfast: [] });
   const [submittedFrom, setSubmittedFrom] = useState('');
   const [submittedTo, setSubmittedTo]     = useState('');
   const [approvedFrom, setApprovedFrom]   = useState('');
@@ -181,6 +189,12 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const [limit, setLimit]       = useState(10);
   const [creating, setCreating] = useState(false);
 
+  // A card has one courier, so picks from both courier fields widen the list (OR).
+  const selectedCourierFilters = useMemo(() => [
+    ...(status === NOT_SENT ? ['none'] : []),
+    ...COURIERS_FOR_FILTER.flatMap((c) => courierStatus[c]),
+  ], [status, courierStatus]);
+
   const fetchRows = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -189,10 +203,11 @@ export default function ScratchCardPage({ claimType = 'first' }) {
         searchTerm: search || undefined,
         reference: reference.trim() || undefined,
         phone: phone.trim() || undefined,
-        status: status || undefined,
+        status: status === NOT_SENT ? undefined : status || undefined,
         prize: prize || undefined,
         crossProductId: crossProductId || undefined,
-        courierStatus: courierStatus.length ? JSON.stringify(courierStatus) : undefined,
+        deliveryArea: deliveryArea || undefined,
+        courierStatus: selectedCourierFilters.length ? JSON.stringify(selectedCourierFilters) : undefined,
         submittedFrom: submittedFrom || undefined,
         submittedTo: submittedTo || undefined,
         approvedFrom: approvedFrom || undefined,
@@ -210,7 +225,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     } finally {
       setLoading(false);
     }
-  }, [search, reference, phone, status, prize, crossProductId, courierStatus, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
+  }, [search, reference, phone, status, prize, crossProductId, deliveryArea, selectedCourierFilters, submittedFrom, submittedTo, approvedFrom, approvedTo, agentFilter, claimType, page, limit]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
@@ -301,10 +316,10 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   function handlePrintStickers() {
     const selected = rows.filter((row) => selectedIds.includes(row.Id));
     if (!selected.length) return alert('Sticker print করার জন্য আগে scratch card select করুন');
-    const printable = selected.filter((row) => row.courier === 'Pathao' && (row.consignmentId || row.trackingCode));
-    if (!printable.length) return alert('Select করা কোনো card Pathao তে পাঠানো হয়নি। আগে Send to Pathao করুন।');
+    const printable = selected.filter((row) => ['Pathao', 'Steadfast'].includes(row.courier) && (row.consignmentId || row.trackingCode));
+    if (!printable.length) return alert('Select করা কোনো card courier এ পাঠানো হয়নি। আগে Send to Steadfast বা Send to Pathao করুন।');
     const skipped = selected.length - printable.length;
-    if (skipped && !window.confirm(`${skipped} টি card Pathao তে পাঠানো হয়নি, সেগুলো বাদ যাবে। বাকি ${printable.length} টি sticker print করবেন?`)) return;
+    if (skipped && !window.confirm(`${skipped} টি card courier এ পাঠানো হয়নি, সেগুলো বাদ যাবে। বাকি ${printable.length} টি sticker print করবেন?`)) return;
     setStickerCards(printable);
   }
 
@@ -353,19 +368,13 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const colCount = columns.length + (canViewAll ? 1 : 0);
   const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(row.Id));
   const filterClass = 'w-full h-9 text-xs border border-gray-300 rounded-md px-2.5 bg-white focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200';
-  const filterValues = [search, reference, phone, status, prize, crossProductId, courierStatus, agentFilter, submittedFrom, submittedTo, approvedFrom, approvedTo];
+  const filterValues = [search, reference, phone, status, prize, crossProductId, deliveryArea, ...COURIERS_FOR_FILTER.map((c) => courierStatus[c]), agentFilter, submittedFrom, submittedTo, approvedFrom, approvedTo];
   const activeFilterCount = filterValues.filter((value) => Array.isArray(value) ? value.length > 0 : Boolean(value)).length;
 
-  const statusOptions = (meta?.statuses?.length ? meta.statuses : STATUSES).map((st) => ({ value: st, label: st }));
-
-  // The exact statuses come from the cards already with a courier.
-  const courierStatusOptions = [
-    ...COURIER_FILTER_BASE,
-    ...(meta?.courierStatuses?.length
-      ? [{ label: 'Exact Status', options: meta.courierStatuses.map((st) => ({ value: `status:${st}`, label: st })) }]
-      : []),
+  const statusOptions = [
+    { value: NOT_SENT, label: 'Not sent to courier' },
+    ...(meta?.statuses?.length ? meta.statuses : STATUSES).map((st) => ({ value: st, label: st })),
   ];
-  const selectedCourierStatus = courierStatus.map((value) => courierStatusOptions.flatMap((g) => g.options).find((option) => option.value === value) || { value, label: value.replace(/^status:/, '') });
 
   const agentOptions = [
     { value: 'unassigned', label: 'Not Assigned' },
@@ -377,8 +386,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   ];
 
   function resetFilters() {
-    setCourierStatus([]);
-    [setSearch, setReference, setPhone, setStatus, setPrize, setCrossProductId, setAgentFilter,
+    setCourierStatus({ Pathao: [], Steadfast: [] });
+    [setSearch, setReference, setPhone, setStatus, setPrize, setCrossProductId, setDeliveryArea, setAgentFilter,
       setSubmittedFrom, setSubmittedTo, setApprovedFrom, setApprovedTo].forEach((set) => set(''));
     setPage(1);
   }
@@ -434,28 +443,34 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             <FilterField label="Status">
               <Select
                 options={statusOptions}
-                value={status ? { value: status, label: status } : null}
+                value={statusOptions.find((option) => option.value === status) || (status ? { value: status, label: status } : null)}
                 onChange={(opt) => { setStatus(opt?.value || ''); setPage(1); }}
                 placeholder="All Status"
                 isClearable
                 styles={FILTER_SELECT_STYLES}
               />
             </FilterField>
-            <FilterField label="Courier Status">
-              <Select
-                options={courierStatusOptions}
-                value={selectedCourierStatus}
-                onChange={(options) => { setCourierStatus((options || []).map((option) => option.value)); setPage(1); }}
-                isMulti
-                closeMenuOnSelect={false}
-                aria-label="Courier Status filter"
-                placeholder="All Courier Statuses"
-                isClearable
-                styles={{ ...FILTER_SELECT_STYLES,
-                  control: (base, state) => ({ ...FILTER_SELECT_STYLES.control(base, state), height: 'auto' }),
-                }}
-              />
-            </FilterField>
+            {COURIERS_FOR_FILTER.map((c) => {
+              const options = courierFilterOptions(c, meta?.courierStatusesByCourier?.[c]);
+              return (
+                <FilterField key={c} label={`${c} Status`}>
+                  <Select
+                    options={options}
+                    value={courierStatus[c].map((value) => options.flatMap((g) => g.options).find((o) => o.value === value)
+                      || { value, label: value.split(':').slice(2).join(':') })}
+                    onChange={(picked) => { setCourierStatus((prev) => ({ ...prev, [c]: (picked || []).map((o) => o.value) })); setPage(1); }}
+                    isMulti
+                    closeMenuOnSelect={false}
+                    aria-label={`${c} Status filter`}
+                    placeholder={`All ${c} Statuses`}
+                    isClearable
+                    styles={{ ...FILTER_SELECT_STYLES,
+                      control: (base, state) => ({ ...FILTER_SELECT_STYLES.control(base, state), height: 'auto' }),
+                    }}
+                  />
+                </FilterField>
+              );
+            })}
             <FilterField label="Prize">
               <Select
                 options={prizeOptions}
@@ -468,14 +483,25 @@ export default function ScratchCardPage({ claimType = 'first' }) {
             </FilterField>
             <FilterField label="Cross Product">
               <Select
-                options={productOptions}
-                value={productOptions.find((option) => String(option.value) === crossProductId) || null}
+                options={[...CROSS_PRODUCT_PRESENCE_OPTIONS, ...productOptions]}
+                value={[...CROSS_PRODUCT_PRESENCE_OPTIONS, ...productOptions].find((option) => String(option.value) === crossProductId) || null}
                 onChange={(option) => { setCrossProductId(option ? String(option.value) : ''); setPage(1); }}
                 placeholder="All Cross Products"
                 aria-label="Filter by Cross Product"
                 isClearable
                 isLoading={productsLoading}
                 isDisabled={productsLoading || Boolean(productsError)}
+                styles={FILTER_SELECT_STYLES}
+              />
+            </FilterField>
+            <FilterField label="Delivery Area">
+              <Select
+                options={DELIVERY_AREA_OPTIONS}
+                value={DELIVERY_AREA_OPTIONS.find((option) => option.value === deliveryArea) || null}
+                onChange={(option) => { setDeliveryArea(option?.value || ''); setPage(1); }}
+                placeholder="All Areas"
+                aria-label="Filter by Delivery Area"
+                isClearable
                 styles={FILTER_SELECT_STYLES}
               />
             </FilterField>
@@ -718,7 +744,7 @@ export default function ScratchCardPage({ claimType = 'first' }) {
       </div>
 
       {/* Image preview */}
-      {stickerCards.length > 0 && <PathaoStickerSheet cards={stickerCards} />}
+      {stickerCards.length > 0 && <ScratchCardStickerSheet cards={stickerCards} />}
 
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}

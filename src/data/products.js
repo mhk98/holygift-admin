@@ -4,7 +4,6 @@ export const productsSubMenu = [
   { key: 'subcategories', label: 'Subcategories' },
   { key: 'childcategories', label: 'Childcategories' },
   { key: 'brands', label: 'Brands' },
-  { key: 'colors', label: 'Colors' },
   { key: 'attribute', label: 'Attribute' },
   { key: 'barcode', label: 'Barcode' },
   { key: 'reviews', label: 'Reviews' },

@@ -34,6 +34,8 @@ import {
   toOrderStatusKey,
 } from "../utils/orderStatuses";
 import { imageUrl } from "../utils/assetUrl";
+import CourierStickerSheet from "../components/CourierStickerSheet";
+import { codAmount } from "../utils/codAmount";
 import {
   getLogo,
   getSiteName,
@@ -169,6 +171,7 @@ export default function OrdersPage({
   const [bulkCourierBusy, setBulkCourierBusy] = useState(false);
   const [barcodePrintOrders, setBarcodePrintOrders] = useState([]);
   const [invoicePrintOrders, setInvoicePrintOrders] = useState([]);
+  const [stickerPrintOrders, setStickerPrintOrders] = useState([]);
   const [assignees, setAssignees] = useState([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [assignBusy, setAssignBusy] = useState(false);
@@ -275,6 +278,19 @@ export default function OrdersPage({
       window.removeEventListener("afterprint", handleAfterPrint);
     };
   }, [invoicePrintOrders.length]);
+
+  useEffect(() => {
+    if (!stickerPrintOrders.length) return undefined;
+
+    const handleAfterPrint = () => setStickerPrintOrders([]);
+    window.addEventListener("afterprint", handleAfterPrint);
+    const timer = window.setTimeout(() => window.print(), 100);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("afterprint", handleAfterPrint);
+    };
+  }, [stickerPrintOrders.length]);
 
   function handleSearch() {
     setAppliedSearch(search);
@@ -572,6 +588,33 @@ export default function OrdersPage({
     }
 
     setInvoicePrintOrders(selectedOrders);
+  }
+
+  function handlePrintSelectedStickers() {
+    const selectedOrders = selectedOrderIds
+      .map((id) => orders.find((order) => Number(order.Id) === Number(id)))
+      .filter(Boolean);
+
+    if (!selectedOrders.length) {
+      alert("Sticker print করার জন্য আগে order select করুন");
+      return;
+    }
+
+    const printable = selectedOrders.filter((order) => getOrderCourierBooking(order));
+    if (!printable.length) {
+      alert("Select করা কোনো order courier এ পাঠানো হয়নি। আগে Send to Pathao বা Steadfast করুন।");
+      return;
+    }
+    const skipped = selectedOrders.length - printable.length;
+    if (
+      skipped &&
+      !window.confirm(
+        `${skipped} টি order courier এ পাঠানো হয়নি, সেগুলো বাদ যাবে। বাকি ${printable.length} টি sticker print করবেন?`,
+      )
+    )
+      return;
+
+    setStickerPrintOrders(printable);
   }
 
   async function handleAssignSelectedOrders() {
@@ -1047,6 +1090,14 @@ export default function OrdersPage({
               <Printer size={14} />
               Print Invoice
             </button>
+            <button
+              type="button"
+              onClick={handlePrintSelectedStickers}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-gray-800"
+            >
+              <Printer size={14} />
+              Print Sticker
+            </button>
           </div>
           {canAssignOrders && (
             <div className="border-t border-gray-100 px-4 pb-4 pt-3">
@@ -1132,6 +1183,10 @@ export default function OrdersPage({
           orders={invoicePrintOrders}
           siteSettings={siteSettings}
         />
+      )}
+
+      {stickerPrintOrders.length > 0 && (
+        <CourierStickerSheet stickers={stickerPrintOrders.map(toOrderSticker)} />
       )}
     </div>
   );
@@ -1971,7 +2026,7 @@ function getInvoiceItems(order, meta) {
       const total = Number(item.total || item.lineTotal || unitPrice * qty);
       return {
         id: item.id || item.productId || index,
-        name: `${item.name || item.productName || "Product"}${item.variant ? ` (${item.variant})` : ""}`,
+        name: `${item.gift ? "🎁 উপহার: " : ""}${item.name || item.productName || "Product"}${item.variant ? ` (${item.variant})` : ""}`,
         qty,
         unitPrice: unitPrice || Math.round(total / qty),
         total,
@@ -2047,6 +2102,58 @@ function getSteadfastInfo(order) {
 function getPathaoInfo(order) {
   const meta = getOrderNoteMeta(order);
   return meta.courierIntegration?.pathao || {};
+}
+
+// The courier the order was booked with, or null when it has not been sent yet.
+function getOrderCourierBooking(order) {
+  const bookings = [
+    { courier: "Pathao", info: getPathaoInfo(order), codField: "amount_to_collect" },
+    { courier: "Steadfast", info: getSteadfastInfo(order), codField: "cod_amount" },
+  ].filter(({ info }) => info.consignmentId || info.trackingCode);
+  if (!bookings.length) return null;
+  return bookings.find(({ courier }) => courier === order.courier) || bookings[0];
+}
+
+function getOrderItems(order) {
+  const meta = getOrderNoteMeta(order);
+  if (Array.isArray(order.items)) return order.items;
+  return Array.isArray(meta.items) ? meta.items : [];
+}
+
+function toOrderSticker(order) {
+  const booking = getOrderCourierBooking(order);
+  const meta = getOrderNoteMeta(order);
+  const due = getOrderAmountSummary(order).due;
+  const bookedCod = Number(booking.info.lastPayload?.[booking.codField]);
+  const items = getOrderItems(order);
+  const describe = (item) =>
+    `${item.name || item.productName || "Product"}${item.variant ? ` (${item.variant})` : ""} x${item.qty || item.quantity || 1}`;
+  const products = items.filter((item) => !item.gift).map(describe).join(", ") || order.productName;
+  const gifts = items.filter((item) => item.gift).map(describe).join(", ");
+  const address =
+    order.customerAddress ||
+    meta.customerAddress ||
+    [order.customerArea, order.customerDistrict].filter(Boolean).join(", ");
+
+  return {
+    key: order.Id,
+    courier: booking.courier,
+    // Steadfast labels are scanned by consignment ID; Pathao uses it as the tracking code too.
+    consignment: String(booking.info.consignmentId || booking.info.trackingCode || ""),
+    name: order.customerName,
+    phone: order.customerPhone,
+    cod: Number.isFinite(bookedCod) ? bookedCod : due,
+    reference: formatInvoiceNumber(order),
+    lines: [
+      address,
+      products && `Product: ${products}`,
+      gifts && `উপহার: ${gifts}`,
+    ],
+    warning:
+      Number.isFinite(bookedCod) && bookedCod !== due
+        ? `Current due: ${codAmount(due)} — courier update required`
+        : null,
+  };
 }
 
 function canSendOrderToCourier(order) {
@@ -2296,6 +2403,25 @@ function getSameDayDuplicateOrderIds(orders = []) {
   return duplicateIds;
 }
 
+// Variant options as [name, value] pairs: { Size: "L" } on current orders, the
+// "Size: L, Color: Red" label or size/color fields on older ones.
+function getItemOptions(item) {
+  if (item.options && typeof item.options === "object" && !Array.isArray(item.options)) {
+    return Object.entries(item.options).filter(([, value]) => value);
+  }
+  if (item.variant) {
+    return String(item.variant)
+      .split(",")
+      .map((part) => part.split(":").map((text) => text.trim()))
+      .map(([name, value]) => (value ? [name, value] : ["", name]))
+      .filter(([, value]) => value);
+  }
+  return [
+    ["Size", item.size],
+    ["Color", item.color],
+  ].filter(([, value]) => value);
+}
+
 function getOrderProductItems(order) {
   const note = parseOrderNote(order.note);
   const noteItems = Array.isArray(note?.items) ? note.items : [];
@@ -2308,6 +2434,8 @@ function getOrderProductItems(order) {
         qty,
         price: Number(item.price || item.salePrice || item.total || 0),
         image: getItemImage(item),
+        options: getItemOptions(item),
+        gift: Boolean(item.gift),
       };
     });
   }
@@ -2651,9 +2779,9 @@ function ProductInfoModal({ order, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {items.map((item, index) => (
                 <tr
-                  key={item.id}
+                  key={`${item.id}-${index}`}
                   className="border-b border-gray-100 last:border-0"
                 >
                   <td className="px-3 py-3">
@@ -2675,7 +2803,27 @@ function ProductInfoModal({ order, onClose }) {
                     </div>
                   </td>
                   <td className="px-3 py-3 text-gray-600">
-                    <div className="max-w-[210px] leading-5">{item.name}</div>
+                    <div className="max-w-[210px] leading-5">
+                      {item.gift && (
+                        <span className="mr-1.5 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                          🎁 উপহার
+                        </span>
+                      )}
+                      {item.name}
+                    </div>
+                    {item.options?.length > 0 && (
+                      <div className="mt-1 flex max-w-[210px] flex-wrap gap-1">
+                        {item.options.map(([name, value]) => (
+                          <span
+                            key={`${name}-${value}`}
+                            className="rounded border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+                          >
+                            {name ? `${name}: ` : ""}
+                            {value}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-3 text-center text-gray-600">
                     {item.qty}

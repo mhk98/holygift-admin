@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Upload, Trash2 } from 'lucide-react';
 import {
-  categoryService, subcategoryService, childcategoryService, brandService, colorService, attributeService,
+  categoryService, subcategoryService, childcategoryService, brandService, attributeService,
 } from '../../services/productService';
 import { supplierService } from '../../services/supplierService';
 import RichEditor from '../../components/RichEditor';
 import VariantBuilder from '../../components/VariantBuilder';
-import PrizeSelect from '../../components/PrizeSelect';
+import GiftProductSelect from '../../components/GiftProductSelect';
 import { newVariantRows, serializeVariants, shiftNewImageRefs } from '../../utils/variants';
 
 // Mirrors the backend slugify so the admin sees the real product URL.
@@ -74,8 +74,8 @@ export default function ProductCreatePage({ onNavigate }) {
   const [metaKeyword, setMetaKeyword]     = useState('');
   const [metaDescription, setMetaDescription] = useState('');
 
-  // scratch card prizes
-  const [prizeIds, setPrizeIds] = useState([]);
+  // products given as gifts
+  const [giftProductIds, setGiftProductIds] = useState([]);
 
   // toggles
   const [status, setStatus]           = useState(true);
@@ -103,7 +103,6 @@ export default function ProductCreatePage({ onNavigate }) {
   const [subcategories,  setSubcategories]  = useState([]);
   const [childcats,      setChildcats]      = useState([]);
   const [brands,         setBrands]         = useState([]);
-  const [colors,         setColors]         = useState([]);
   const [attributes,     setAttributes]     = useState([]);
   const [suppliers,      setSuppliers]      = useState([]);
 
@@ -124,7 +123,6 @@ export default function ProductCreatePage({ onNavigate }) {
   useEffect(() => {
     categoryService.getAllList().then(r => setCategories(r.data || [])).catch(() => {});
     brandService.getAllList().then(r => setBrands(r.data || [])).catch(() => {});
-    colorService.getAllList().then(r => setColors(r.data || [])).catch(() => {});
     attributeService.getAllList().then(r => setAttributes(r.data || [])).catch(() => {});
     supplierService.getAllList().then(r => setSuppliers(r.data || [])).catch(() => {});
   }, []);
@@ -198,7 +196,7 @@ export default function ProductCreatePage({ onNavigate }) {
       if (metaTitle)     fd.append('metaTitle', metaTitle);
       if (metaKeyword)   fd.append('metaKeyword', metaKeyword);
       if (metaDescription) fd.append('metaDescription', metaDescription);
-      fd.append('prizeIds', JSON.stringify(prizeIds));
+      fd.append('giftProductIds', JSON.stringify(giftProductIds));
       fd.append('status',       status       ? 'Active' : 'Inactive');
       fd.append('freeShipping', freeShipping ? 'true' : 'false');
       fd.append('purchaseEnabled', purchaseEnabled ? 'true' : 'false');
@@ -377,7 +375,7 @@ export default function ProductCreatePage({ onNavigate }) {
 
       {/* Price & Variation */}
       <SectionCard title="Price & Variation">
-        <VariantBuilder attributes={attributes} colors={colors} images={imagePreviews.map((src, i) => ({ ref: `new:${i}`, src }))} rows={variations} onChange={setVariations} />
+        <VariantBuilder attributes={attributes} images={imagePreviews.map((src, i) => ({ ref: `new:${i}`, src }))} rows={variations} onChange={setVariations} />
       </SectionCard>
 
       {/* Purchase */}
@@ -449,10 +447,10 @@ export default function ProductCreatePage({ onNavigate }) {
         </div>
       </SectionCard>
 
-      {/* Scratch Card Prize */}
-      <SectionCard title="Scratch Card Prize">
-        <FormField label="এই product এর সাথে যে prize দেওয়া হবে">
-          <PrizeSelect value={prizeIds} onChange={setPrizeIds} />
+      {/* Gift Products */}
+      <SectionCard title="Gift Product">
+        <FormField label="এই product এর সাথে যে product উপহার দেওয়া হবে">
+          <GiftProductSelect value={giftProductIds} onChange={setGiftProductIds} />
         </FormField>
       </SectionCard>
 

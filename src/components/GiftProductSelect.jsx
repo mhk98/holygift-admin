@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Select from 'react-select';
-import { scratchCardPrizeService } from '../services/scratchCardService';
+import { productService } from '../services/productService';
 import { imageUrl } from '../utils/assetUrl';
 
 const SELECT_STYLES = {
@@ -19,8 +19,13 @@ const SELECT_STYLES = {
   multiValueLabel: (base) => ({ ...base, color: '#1d4ed8' }),
 };
 
-const prizeLabel = (prize) =>
-  prize.nameBn ? `${prize.nameBn} (${prize.name})` : prize.name;
+const firstImage = (product) => {
+  let images = product.images;
+  if (typeof images === 'string') {
+    try { images = JSON.parse(images); } catch { images = []; }
+  }
+  return product.file || (Array.isArray(images) ? images[0] : null) || null;
+};
 
 function formatOption(option) {
   return (
@@ -33,24 +38,26 @@ function formatOption(option) {
   );
 }
 
-// Multi-select of the scratch card prizes; `value` is an array of prize Ids.
-export default function PrizeSelect({ value = [], onChange }) {
-  const [prizes, setPrizes] = useState([]);
+// Multi-select of all products (Active and Inactive) given free with a product;
+// `value` is an array of product Ids. `excludeId` hides the product being edited.
+export default function GiftProductSelect({ value = [], onChange, excludeId }) {
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    scratchCardPrizeService.getAll()
-      .catch(() => scratchCardPrizeService.getPublic())
-      .then((r) => setPrizes(Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []))
-      .catch(() => setPrizes([]))
+    productService.getAllList()
+      .then((r) => setProducts(Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []))
+      .catch(() => setProducts([]))
       .finally(() => setLoading(false));
   }, []);
 
-  const options = prizes.map((prize) => ({
-    value: Number(prize.Id),
-    label: prize.status === 'Inactive' ? `${prizeLabel(prize)} — Inactive` : prizeLabel(prize),
-    image: prize.image,
-  }));
+  const options = products
+    .filter((product) => Number(product.Id) !== Number(excludeId))
+    .map((product) => ({
+      value: Number(product.Id),
+      label: product.status === 'Inactive' ? `${product.name} — Inactive` : product.name,
+      image: firstImage(product),
+    }));
   const selected = options.filter((option) => value.includes(option.value));
 
   return (
@@ -66,8 +73,8 @@ export default function PrizeSelect({ value = [], onChange }) {
         onChange={(items) => onChange((items || []).map((item) => item.value))}
         formatOptionLabel={formatOption}
         closeMenuOnSelect={false}
-        placeholder="Select prize..."
-        noOptionsMessage={() => 'কোনো prize নেই — Scratch Card › Prizes থেকে add করুন'}
+        placeholder="Select product..."
+        noOptionsMessage={() => 'কোনো product পাওয়া যায়নি'}
         styles={SELECT_STYLES}
       />
     </div>

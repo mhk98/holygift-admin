@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import CreatableSelect from 'react-select/creatable';
 import { Plus, Trash2, X } from 'lucide-react';
 import {
   buildRows, groupsFromRows, parseJson, calcDiscountPercent, calcDiscountedPrice,
@@ -9,19 +10,34 @@ import {
 
 const MAX_GROUPS = 3;
 const inputCls = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 bg-white';
+const NAME_SELECT_STYLES = {
+  control: (base, state) => ({
+    ...base,
+    minHeight: 38,
+    fontSize: 14,
+    borderRadius: 8,
+    borderColor: state.isFocused ? '#60a5fa' : '#d1d5db',
+    boxShadow: state.isFocused ? '0 0 0 2px #93c5fd' : 'none',
+    '&:hover': { borderColor: state.isFocused ? '#60a5fa' : '#9ca3af' },
+  }),
+  menu: (base) => ({ ...base, fontSize: 14 }),
+  menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+};
 const cellInputCls = 'w-full border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300 text-gray-700';
 
-function OptionGroup({ group, attributes, colors, usedNames, onChange, onRemove }) {
+const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+function OptionGroup({ group, attributes, usedNames, onChange, onRemove }) {
   const [draft, setDraft] = useState('');
-  const attribute = attributes.find(item => item.name === group.name);
-  const suggestions = group.name === 'Color'
-    ? colors.map(color => color.name)
-    : parseJson(attribute?.values, []).map(String);
-  // Keep the saved name selectable even if that attribute was renamed or not loaded yet.
-  const nameChoices = [group.name, 'Color', ...attributes.map(item => item.name)]
+  const attribute = attributes.find(item => sameName(item.name, group.name));
+  const suggestions = parseJson(attribute?.values, []).map(String);
+  // Names come from Products › Attribute; any other name can be typed in.
+  // The saved name stays selectable even if that attribute was renamed or not loaded yet.
+  const otherNames = usedNames.filter(name => name && name !== group.name);
+  const nameChoices = [group.name, ...attributes.map(item => item.name)]
     .filter(Boolean)
-    .filter((name, idx, all) => all.indexOf(name) === idx)
-    .filter(name => name === group.name || !usedNames.includes(name));
+    .filter((name, idx, all) => all.findIndex(other => sameName(other, name)) === idx)
+    .filter(name => name === group.name || !otherNames.some(other => sameName(other, name)));
 
   function addValue(raw) {
     const value = String(raw || '').trim();
@@ -33,14 +49,23 @@ function OptionGroup({ group, attributes, colors, usedNames, onChange, onRemove 
   return (
     <div className="rounded-lg border border-gray-200 p-3 space-y-2">
       <div className="flex items-center gap-2">
-        <select
-          className={`${inputCls} max-w-[220px]`}
-          value={group.name}
-          onChange={e => onChange({ name: e.target.value, values: [] })}
-        >
-          <option value="">Select option (Size / Color / ML)</option>
-          {nameChoices.map(name => <option key={name} value={name}>{name}</option>)}
-        </select>
+        <div className="w-full max-w-[260px]">
+          <CreatableSelect
+            // Product form cards clip overflow, so the menu renders on <body>.
+            menuPortalTarget={document.body}
+            menuPosition="fixed"
+            options={nameChoices.map(name => ({ value: name, label: name }))}
+            value={group.name ? { value: group.name, label: group.name } : null}
+            onChange={option => onChange({ name: (option?.value || '').trim(), values: [] })}
+            isValidNewOption={input => Boolean(input.trim())
+              && !nameChoices.some(name => sameName(name, input))
+              && !otherNames.some(name => sameName(name, input))}
+            formatCreateLabel={input => `Add "${input.trim()}"`}
+            placeholder="Select or type (Size / Color / ML)"
+            noOptionsMessage={() => 'নাম লিখুন, যেমন Weight'}
+            styles={NAME_SELECT_STYLES}
+          />
+        </div>
         <button type="button" onClick={onRemove} className="ml-auto h-9 w-9 rounded-lg bg-rose-500 text-white inline-flex items-center justify-center">
           <Trash2 size={14} />
         </button>
@@ -75,7 +100,7 @@ function OptionGroup({ group, attributes, colors, usedNames, onChange, onRemove 
   );
 }
 
-export default function VariantBuilder({ attributes = [], colors = [], images = [], rows, onChange }) {
+export default function VariantBuilder({ attributes = [], images = [], rows, onChange }) {
   const [groups, setGroups] = useState(() => groupsFromRows(rows));
   const [bulk, setBulk] = useState({ purchasePrice: '', oldPrice: '', newPrice: '', stock: '' });
 
@@ -119,7 +144,6 @@ export default function VariantBuilder({ attributes = [], colors = [], images = 
             key={idx}
             group={group}
             attributes={attributes}
-            colors={colors}
             usedNames={groups.map(item => item.name)}
             onChange={next => updateGroups(groups.map((item, i) => (i === idx ? next : item)))}
             onRemove={() => updateGroups(groups.filter((_, i) => i !== idx))}

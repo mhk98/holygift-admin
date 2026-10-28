@@ -27,8 +27,6 @@ export const PAGE_PERMISSION_MAP = {
   edit_childcategory: ['products'],
   create_brand: ['products'],
   edit_brand: ['products'],
-  create_color: ['products'],
-  edit_color: ['products'],
   create_attribute: ['products'],
   edit_attribute: ['products'],
   create_review: ['products'],

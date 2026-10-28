@@ -45,15 +45,6 @@ export const brandService = {
   delete: (id) => apiRequest(`/brand/${id}`, { method: "DELETE" }),
 };
 
-export const colorService = {
-  getAll: (params) => apiRequest(`/color${buildQuery(params)}`),
-  getAllList: () => apiRequest("/color/all"),
-  getById: (id) => apiRequest(`/color/${id}`),
-  create: (data) => apiRequest("/color/create", { method: "POST", body: JSON.stringify(data) }),
-  update: (id, data) => apiRequest(`/color/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  delete: (id) => apiRequest(`/color/${id}`, { method: "DELETE" }),
-};
-
 export const attributeService = {
   getAll: (params) => apiRequest(`/attribute${buildQuery(params)}`),
   getAllList: () => apiRequest("/attribute/all"),
