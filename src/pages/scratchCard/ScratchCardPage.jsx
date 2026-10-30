@@ -102,6 +102,8 @@ const COURIERS = [
   { key: 'steadfast', label: 'Steadfast' },
   { key: 'pathao', label: 'Pathao' },
 ];
+// Matches the backend's per-request limit for Steadfast.
+const COURIER_CHUNK_SIZE = 100;
 
 // One line per card the courier didn't take, so the admin knows what to fix.
 // Pathao rejects shorter delivery addresses.
@@ -274,16 +276,27 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     if (!selectedIds.length) return alert('Courier এ পাঠানোর জন্য আগে Approved scratch card select করুন');
     if (!window.confirm(`${selectedIds.length} টি scratch card ${provider.label} এ পাঠাবেন?`)) return;
     setCourierBusy(true);
-    try {
-      const res = await scratchCardService.sendToCourier(provider.key, selectedIds);
-      const { sent = [], skipped = [] } = res.data || {};
-      alert(courierSummary(`${provider.label} এ পাঠানো হয়েছে`, sent.length, skipped));
-      fetchRows();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setCourierBusy(false);
+    // One request per chunk keeps each courier call short enough to finish;
+    // a failed chunk stops the rest so nothing is sent twice by mistake.
+    const sent = [];
+    const skipped = [];
+    let failure = null;
+    for (let start = 0; start < selectedIds.length; start += COURIER_CHUNK_SIZE) {
+      const chunk = selectedIds.slice(start, start + COURIER_CHUNK_SIZE);
+      try {
+        const res = await scratchCardService.sendToCourier(provider.key, chunk);
+        sent.push(...(res.data?.sent || []));
+        skipped.push(...(res.data?.skipped || []));
+      } catch (err) {
+        failure = `${start + 1}–${start + chunk.length} নম্বর card পাঠানোর সময় সমস্যা: ${err.message}\n` +
+          `বাকি ${selectedIds.length - start} টি card পাঠানো হয়নি। আবার পাঠানোর আগে ${provider.label} panel এ check করুন।`;
+        break;
+      }
     }
+    const summary = courierSummary(`${provider.label} এ পাঠানো হয়েছে`, sent.length, skipped);
+    alert(failure ? `${failure}\n\n${summary}` : summary);
+    fetchRows();
+    setCourierBusy(false);
   }
 
   async function handleSyncCourier() {

@@ -7,15 +7,15 @@ export default defineConfig({
   server: {
     proxy: {
       "/api/v1": {
-        target: "https://api.holygift.xyz",
+        target: "http://localhost:5000",
         changeOrigin: true,
       },
       "/images": {
-        target: "https://api.holygift.xyz",
+        target: "http://localhost:5000",
         changeOrigin: true,
       },
       "/socket.io": {
-        target: "https://api.holygift.xyz",
+        target: "http://localhost:5000",
         ws: true,
         changeOrigin: true,
       },
