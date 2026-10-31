@@ -12,6 +12,9 @@ export const scratchCardService = {
     apiRequest(`/scratch-cards/courier/${provider}`, { method: "POST", body: JSON.stringify({ ids }) }),
   syncCourier: (ids) =>
     apiRequest("/scratch-cards/courier/sync", { method: "POST", body: JSON.stringify({ ids }) }),
+  // Clears the courier link so a card sent to the wrong courier can be sent again.
+  unlinkCourier: (ids) =>
+    apiRequest("/scratch-cards/courier/unlink", { method: "POST", body: JSON.stringify({ ids }) }),
   delete: (id) => apiRequest(`/scratch-cards/${id}`, { method: "DELETE" }),
 };
 

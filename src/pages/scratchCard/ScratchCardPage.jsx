@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Select from 'react-select';
 import { normalizeCrossProducts } from '../../utils/crossProducts';
-import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer, Plus } from 'lucide-react';
+import { X, Trash2, StickyNote, Pencil, Check, Filter, RotateCcw, Search, ChevronLeft, ChevronRight, Printer, Plus, Unlink } from 'lucide-react';
 import { productService } from '../../services/productService';
 import { scratchCardService, scratchCardPrizeService } from '../../services/scratchCardService';
 import { imageUrl } from '../../utils/assetUrl';
@@ -98,22 +98,22 @@ const FILTER_ROW_DATES = {
   gap: '12px 24px',
 };
 
+// chunk: cards per request. Steadfast books them in one bulk call (max 500);
+// Pathao books one by one, so smaller chunks keep each request short.
 const COURIERS = [
-  { key: 'steadfast', label: 'Steadfast' },
-  { key: 'pathao', label: 'Pathao' },
+  { key: 'steadfast', label: 'Steadfast', chunk: 500 },
+  { key: 'pathao', label: 'Pathao', chunk: 100 },
 ];
-// Matches the backend's per-request limit for Steadfast.
-const COURIER_CHUNK_SIZE = 100;
 
 // One line per card the courier didn't take, so the admin knows what to fix.
 // Pathao rejects shorter delivery addresses.
 const MIN_PATHAO_ADDRESS_LENGTH = 10;
 const isShortAddress = (address) => String(address || '').trim().length < MIN_PATHAO_ADDRESS_LENGTH;
 
-function courierSummary(title, done, problems) {
+function courierSummary(title, done, problems, problemTitle = 'পাঠানো যায়নি:') {
   const lines = [`${title}: ${done}`];
   if (problems.length) {
-    lines.push('', 'পাঠানো যায়নি:');
+    lines.push('', problemTitle);
     // Same reason once, with every card it applies to, so other reasons stand out.
     const byMessage = new Map();
     problems.forEach((p) => byMessage.set(p.message, [...(byMessage.get(p.message) || []), p.reference]));
@@ -150,12 +150,13 @@ export default function ScratchCardPage({ claimType = 'first' }) {
   const isRepeat = claimType === 'repeat';
   const copy = PAGE_COPY[claimType] || PAGE_COPY.first;
   const { user } = useAuth();
-  // Admins assign claims to agents; an agent's list only holds their own
-  // claims (the backend enforces this).
+  // Admins assign claims to agents. An agent sees every claim, their own
+  // first, but can only change their own (the backend enforces this).
   const userRole = String(user?.role || '').trim().toLowerCase();
   const canAssign = ['superadmin', 'admin'].includes(userRole);
   // Leaders see and work every claim like an admin, but cannot assign or delete.
   const canViewAll = canAssign || userRole === 'leader';
+  const canEditRow = (row) => canViewAll || Number(row.assignedAgentId) === Number(user?.Id);
   const [productOptions, setProductOptions] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState('');
@@ -281,8 +282,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
     const sent = [];
     const skipped = [];
     let failure = null;
-    for (let start = 0; start < selectedIds.length; start += COURIER_CHUNK_SIZE) {
-      const chunk = selectedIds.slice(start, start + COURIER_CHUNK_SIZE);
+    for (let start = 0; start < selectedIds.length; start += provider.chunk) {
+      const chunk = selectedIds.slice(start, start + provider.chunk);
       try {
         const res = await scratchCardService.sendToCourier(provider.key, chunk);
         sent.push(...(res.data?.sent || []));
@@ -306,6 +307,31 @@ export default function ScratchCardPage({ claimType = 'first' }) {
       const res = await scratchCardService.syncCourier(selectedIds);
       const { synced = [], failed = [] } = res.data || {};
       alert(courierSummary('Status sync হয়েছে', synced.length, failed));
+      fetchRows();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setCourierBusy(false);
+    }
+  }
+
+  // Unlinking only clears our record; the parcel stays booked at the courier.
+  async function handleUnlinkCourier(ids) {
+    const cards = rows.filter((row) => ids.includes(row.Id));
+    const linked = cards.filter((row) => row.courier);
+    if (!linked.length) return alert('Select করা কোনো card courier এ পাঠানো হয়নি।');
+    const list = linked.slice(0, 10).map((row) => `• ${row.referenceCode} — ${row.courier}${row.consignmentId ? ` (${row.consignmentId})` : ''}`).join('\n');
+    const more = linked.length > 10 ? `\n...আরো ${linked.length - 10} টি` : '';
+    if (!window.confirm(
+      `${linked.length} টি card এর courier unlink করবেন?\n\n${list}${more}\n\n` +
+      'Consignment ID ও tracking মুছে card আবার Approved হবে, তারপর সঠিক courier এ পাঠাতে পারবেন।\n' +
+      'Courier এর কাছে parcel টি থেকে যাবে — Steadfast/Pathao panel থেকে সেটি cancel করুন। পুরনো consignment ID note এ রাখা থাকবে।'
+    )) return;
+    setCourierBusy(true);
+    try {
+      const res = await scratchCardService.unlinkCourier(linked.map((row) => row.Id));
+      const { unlinked = [], skipped = [] } = res.data || {};
+      alert(courierSummary('Courier unlink হয়েছে', unlinked.length, skipped, 'Unlink করা যায়নি:'));
       fetchRows();
     } catch (err) {
       alert(err.message);
@@ -577,6 +603,11 @@ export default function ScratchCardPage({ claimType = 'first' }) {
               className="rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold px-4 py-1.5 transition">
               {courierBusy ? 'Please wait...' : 'Sync Status'}
             </button>
+            <button type="button" onClick={() => handleUnlinkCourier(selectedIds)} disabled={courierBusy || !selectedIds.length}
+              title="ভুল courier এ পাঠানো card এর consignment unlink করে আবার পাঠানোর সুযোগ দিন"
+              className="flex items-center gap-1 rounded-full border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold px-4 py-1.5 transition">
+              <Unlink size={13} /> Unlink Courier
+            </button>
             <button type="button" onClick={handlePrintStickers} disabled={!selectedIds.length}
               className="flex items-center gap-1 rounded-full border border-gray-400 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold px-4 py-1.5 transition">
               <Printer size={13} /> Print Sticker
@@ -610,8 +641,11 @@ export default function ScratchCardPage({ claimType = 'first' }) {
               {!loading && !error && rows.length === 0 && (
                 <tr><td colSpan={colCount} className="text-center py-10 text-gray-400">{copy.empty}</td></tr>
               )}
-              {!loading && !error && rows.map((row, i) => (
-                <tr key={row.Id} className="border-b border-gray-50 hover:bg-gray-50/60 transition align-top">
+              {!loading && !error && rows.map((row, i) => {
+                const editable = canEditRow(row);
+                return (
+                <tr key={row.Id} className={`border-b border-gray-50 transition align-top ${
+                  !canViewAll && editable ? 'bg-teal-50/60 hover:bg-teal-50' : 'hover:bg-gray-50/60'}`}>
                   {canViewAll && (
                     <td className="pl-4 py-3">
                       <input type="checkbox" checked={selectedIds.includes(row.Id)} onChange={() => toggleSelected(row.Id)} />
@@ -620,21 +654,33 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   <td className="px-4 py-3 text-gray-500">{(page - 1) * limit + i + 1}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="font-mono font-semibold text-gray-800">{row.referenceCode || '—'}</div>
+                    {!canViewAll && (editable ? (
+                      <div className="mt-1 inline-block rounded-full bg-teal-100 text-teal-700 px-2 py-0.5 text-[10px] font-semibold">Assigned to you</div>
+                    ) : (
+                      <div className="mt-1 text-[11px] text-gray-400">View only</div>
+                    ))}
                     {(reference || phone) && (
                       <div className="mt-1 text-[11px] text-gray-500">{row.claimType === 'repeat' ? 'Repeat card' : 'First card'}</div>
                     )}
                   </td>
                   {/* Set once the card is sent to Pathao/Steadfast; Steadfast also gives a separate tracking code. */}
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {row.consignmentId ? (
+                    {row.courier ? (
                       <>
-                        <div className="font-mono font-semibold text-gray-800">{row.consignmentId}</div>
+                        <div className="font-mono font-semibold text-gray-800">{row.consignmentId || '—'}</div>
                         <div className="mt-1 text-[11px] text-gray-500">
                           {row.courier}
                           {row.trackingCode && row.trackingCode !== row.consignmentId && (
                             <> · Tracking <span className="font-mono">{row.trackingCode}</span></>
                           )}
                         </div>
+                        {canViewAll && (
+                          <button type="button" onClick={() => handleUnlinkCourier([row.Id])} disabled={courierBusy}
+                            title={`${row.courier} থেকে unlink করুন`}
+                            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 hover:text-red-700 hover:underline disabled:opacity-50">
+                            <Unlink size={11} /> Unlink
+                          </button>
+                        )}
                       </>
                     ) : <span className="text-gray-400">—</span>}
                   </td>
@@ -652,24 +698,32 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                     <a href={`tel:${row.phone}`} className="hover:text-blue-600">{row.phone}</a>
                   </td>
                   <td className="px-4 py-3 text-gray-600 max-w-[260px] whitespace-pre-line break-words">
-                    {!row.courier ? (
+                    {!row.courier && editable ? (
                       <AddressEditor row={row} saving={savingId === row.Id}
                         onSave={(address) => updateRow(row, { address })} />
                     ) : row.address}
                   </td>
                   <td className="px-4 py-3">
-                    <PrizeEditor row={row} saving={savingId === row.Id}
-                      onSave={(prize) => updateRow(row, { prize })} />
+                    {editable ? (
+                      <PrizeEditor row={row} saving={savingId === row.Id}
+                        onSave={(prize) => updateRow(row, { prize })} />
+                    ) : <PrizeBadge prize={row.prize} />}
                   </td>
                   <td className="px-4 py-3">
-                    <CrossProductEditor row={row} options={productOptions}
-                      loading={productsLoading} error={productsError}
-                      onRetry={() => { setProductsLoading(true); setProductsError(''); setProductReload((value) => value + 1); }}
-                      onSave={(crossProductIds) => updateRow(row, { crossProductIds })} />
+                    {editable ? (
+                      <CrossProductEditor row={row} options={productOptions}
+                        loading={productsLoading} error={productsError}
+                        onRetry={() => { setProductsLoading(true); setProductsError(''); setProductReload((value) => value + 1); }}
+                        onSave={(crossProductIds) => updateRow(row, { crossProductIds })} />
+                    ) : (
+                      <span className="text-gray-600">
+                        {normalizeCrossProducts(row.crossProducts).map((product) => product.name).join(', ') || '—'}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <DeliveryCharge row={row} charges={meta?.deliveryCharges}
-                      editable={!row.courier} saving={savingId === row.Id}
+                      editable={!row.courier && editable} saving={savingId === row.Id}
                       onChange={(deliveryArea) => updateRow(row, { deliveryArea })}
                       onSaveAmount={(deliveryCharge) => updateRow(row, { deliveryCharge })} />
                   </td>
@@ -689,14 +743,16 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                     </td>
                   )}
                   <td className="px-4 py-3">
-                    {row.courier ? (
+                    {row.courier || !editable ? (
                       <>
                         <span className={`inline-block rounded-full border px-2.5 py-1 font-semibold whitespace-nowrap ${STATUS_STYLES[row.status] || COURIER_STATUS_STYLE}`}>
                           {row.status}
                         </span>
-                        <p className="mt-1.5 text-[11px] text-gray-500 whitespace-nowrap">
-                          {row.courier}
-                        </p>
+                        {row.courier && (
+                          <p className="mt-1.5 text-[11px] text-gray-500 whitespace-nowrap">
+                            {row.courier}
+                          </p>
+                        )}
                       </>
                     ) : (
                       <select value={row.status} disabled={savingId === row.Id}
@@ -714,10 +770,12 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
-                      <button type="button" title="Note" onClick={() => setNoteTarget({ ...row })}
-                        className="w-7 h-7 rounded bg-purple-500 hover:bg-purple-600 text-white flex items-center justify-center transition">
-                        <StickyNote size={12} />
-                      </button>
+                      {editable && (
+                        <button type="button" title="Note" onClick={() => setNoteTarget({ ...row })}
+                          className="w-7 h-7 rounded bg-purple-500 hover:bg-purple-600 text-white flex items-center justify-center transition">
+                          <StickyNote size={12} />
+                        </button>
+                      )}
                       {canAssign && (
                         <button type="button" title="Delete" onClick={() => handleDelete(row)}
                           className="w-7 h-7 rounded bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition">
@@ -727,7 +785,8 @@ export default function ScratchCardPage({ claimType = 'first' }) {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
